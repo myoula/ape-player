@@ -264,3 +264,9 @@ UI/HTTP 回归覆盖右键不触发详情跳转、三个菜单的请求方法/�
 ## 播放后逐级返回首页刷新
 
 修复播放器先返回详情、再经过媒体库或直接回首页时，只恢复历史快照而不刷新继续观看的问题。返回首页统一调用 loadHome，沿用等待最后一次停止上报、请求代次校验和来源取消逻辑；详情及列表的导航上下文仍恢复。新增直接返回、经详情返回、经详情和媒体库返回三条路径的回归，验证上报完成前不请求、完成后发起首页加载，更新既有导航测试。`make test vet build` 通过；本地及模拟 Emby 原生 GPU 播放均通过，丢帧为 0。未使用真实服务器验证其进度持久化时延。
+
+## 最后一集添加时间排序
+
+首页剧集及混合媒体库横排改为 SortBy=DateLastContentAdded、SortOrder=Descending，由 Emby 根据最后新增内容排序后取 18 项；电影库继续使用 DateCreated，继续观看维持 DatePlayed。分类列表新增「最后一集添加时间」，同样由服务器排序，切换时回到第一页，翻页保持排序和筛选。字段依据 Emby 官方 SDK 的 [ItemSortBy 文档](https://github.com/MediaBrowser/Emby.SDK/blob/master/Documentation/reference/pluginapi/MediaBrowser.Model.Querying.ItemSortBy.html) 核实。
+
+更新首页请求回归，新增排序下拉 UI/HTTP 回归，覆盖四种排序字段及方向、切换重置页码、后续分页和分类/观看状态筛选。`make test vet build` 通过；未连接真实服务器验证其最后新增内容时间元数据。

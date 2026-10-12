@@ -286,7 +286,7 @@ func (a *App) libraryView(c *ui.Context) {
 	ui.Column(c).Grow(1).Padding(0, 28, 20).Gap(14).Children(func() {
 		ui.Row(c).Gap(12).Children(func() {
 			ui.Select(c, &a.kind, []string{"全部类型", "电影", "剧集"}).Width(150).OnChange(func() { a.offset = 0; a.loadItems() })
-			ui.Select(c, &a.sort, []string{"最近添加", "名称", "年份"}).Width(150).OnChange(func() { a.offset = 0; a.loadItems() })
+			ui.Select(c, &a.sort, []string{"最近添加", "最后一集添加时间", "名称", "年份"}).Width(180).Label("排序方式").OnChange(func() { a.offset = 0; a.loadItems() })
 			ui.Select(c, &a.watched, []string{"全部状态", "未观看", "已观看"}).Width(150).OnChange(func() { a.offset = 0; a.loadItems() })
 			ui.Spacer(c)
 			actionButton(c, "refresh-cw", "刷新").OnClick(a.loadItems)

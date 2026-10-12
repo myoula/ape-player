@@ -210,13 +210,15 @@ func TestHomeLibraryShelves(t *testing.T) {
 			}
 		}
 		want := "Series"
+		wantSort := "DateLastContentAdded"
 		if parent == "movies" {
 			want = "Movie"
+			wantSort = "DateCreated"
 		}
 		if parent == "mixed" {
 			want = "Movie,Series"
 		}
-		if r.URL.Path != "/Users/u/Items" || q.Get("IncludeItemTypes") != want || q.Get("Recursive") != "true" || q.Get("Limit") != "18" || q.Get("SortBy") != "DateCreated" || q.Get("SortOrder") != "Descending" || q.Get("EnableUserData") != "true" {
+		if r.URL.Path != "/Users/u/Items" || q.Get("IncludeItemTypes") != want || q.Get("Recursive") != "true" || q.Get("Limit") != "18" || q.Get("SortBy") != wantSort || q.Get("SortOrder") != "Descending" || q.Get("EnableUserData") != "true" {
 			t.Errorf("incorrect category query: %s", r.URL.String())
 		}
 		if parent == "jp" {

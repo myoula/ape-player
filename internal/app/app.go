@@ -381,6 +381,8 @@ func (a *App) loadItems() {
 		q["SortOrder"] = []string{"Ascending"}
 	} else if a.sort == "年份" {
 		q["SortBy"] = []string{"ProductionYear"}
+	} else if a.sort == "最后一集添加时间" {
+		q["SortBy"] = []string{"DateLastContentAdded"}
 	}
 	go func() {
 		r, e := c.List(ctx, "Users/"+c.UserID+"/Items", q)

@@ -60,15 +60,17 @@ func fetchHome(ctx context.Context, c *emby.Client, after <-chan struct{}) (home
 			section: section{Title: library.Name, LibraryID: library.ID, Kind: libraryKind(library)},
 			load: func() ([]emby.Item, error) {
 				types := "Movie,Series"
+				sortBy := "DateLastContentAdded"
 				switch library.CollectionType {
 				case "movies":
 					types = "Movie"
+					sortBy = "DateCreated"
 				case "tvshows":
 					types = "Series"
 				}
 				r, err := c.List(ctx, "Users/"+c.UserID+"/Items", map[string][]string{
 					"ParentId": {library.ID}, "Recursive": {"true"}, "IncludeItemTypes": {types},
-					"SortBy": {"DateCreated"}, "SortOrder": {"Descending"}, "Limit": {"18"}, "EnableUserData": {"true"},
+					"SortBy": {sortBy}, "SortOrder": {"Descending"}, "Limit": {"18"}, "EnableUserData": {"true"},
 					"Fields": {emby.YearFields},
 				})
 				return r.Items, err

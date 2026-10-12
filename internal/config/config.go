@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Source struct {
@@ -27,10 +28,11 @@ type Settings struct {
 	Volume           float64
 }
 type Config struct {
-	Sources  []Source
-	Active   string
-	DeviceID string
-	Settings Settings
+	Sources      []Source
+	Active       string
+	DeviceID     string
+	Settings     Settings
+	HiddenResume map[string]map[string]time.Time `json:",omitempty"`
 }
 
 func ID() string { var b [16]byte; _, _ = rand.Read(b[:]); return hex.EncodeToString(b[:]) }

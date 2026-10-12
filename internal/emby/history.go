@@ -7,6 +7,11 @@ import (
 	"strconv"
 )
 
+// HideFromResume hides an item from Continue Watching without deleting media.
+func (c *Client) HideFromResume(ctx context.Context, id string, hide bool) error {
+	return c.Do(ctx, "POST", "Users/"+c.UserID+"/Items/"+id+"/HideFromResume", url.Values{"Hide": {strconv.FormatBool(hide)}}, nil, nil)
+}
+
 // RecentlyPlayed includes unfinished and completed videos. IsPlayed would omit
 // unfinished videos; a last-played timestamp distinguishes history from unseen items.
 func (c *Client) RecentlyPlayed(ctx context.Context, limit int) ([]Item, error) {

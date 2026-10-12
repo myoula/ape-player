@@ -51,10 +51,6 @@ func fetchHome(ctx context.Context, c *emby.Client, after <-chan struct{}) (home
 			})
 			return r.Items, e
 		}},
-		{section{Title: "最近添加"}, func() ([]emby.Item, error) {
-			r, e := c.List(ctx, "Users/"+c.UserID+"/Items", map[string][]string{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode"}, "SortBy": {"DateCreated"}, "SortOrder": {"Descending"}, "Limit": {"18"}, "Fields": {"Overview," + emby.YearFields}})
-			return r.Items, e
-		}},
 	}
 	for _, library := range data.libraries {
 		if library.ID == "" {
@@ -178,6 +174,7 @@ func (a *App) loadHome() {
 			}
 			a.libraries = data.libraries
 			a.sections = data.sections
+			a.filterResumeSections()
 			a.message = data.warning
 		})
 	}()

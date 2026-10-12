@@ -527,6 +527,7 @@ func TestScrollbarInsets(t *testing.T) {
 
 func TestPersistentScrollbars(t *testing.T) {
 	persistent, overflow := true, true
+	hidden := false
 	var scroll ScrollState
 	theme := DarkTheme()
 	theme.Scrollbar = RGB(255, 0, 0)
@@ -535,6 +536,9 @@ func TestPersistentScrollbars(t *testing.T) {
 		sc := coreScrollHorizontal(c).Size(200, 100).Background(RGB(0, 0, 0)).TrackScroll(&scroll)
 		if persistent {
 			sc.PersistentScrollbars()
+		}
+		if hidden {
+			sc.HideScrollbars().DragScroll()
 		}
 		sc.Children(func() {
 			width := float32(1000)
@@ -567,6 +571,26 @@ func TestPersistentScrollbars(t *testing.T) {
 	tt.Frame()
 	if tt.Image().RGBAAt(12, 94).R != 0 {
 		t.Fatal("scrollbar painted without overflowing content")
+	}
+	hidden, overflow = true, true
+	tt.Frame()
+	tt.Move(12, 94)
+	if tt.Image().RGBAAt(12, 94).R != 0 || tt.Image().RGBAAt(150, 94).R != 0 {
+		t.Fatal("hidden scrollbar painted its thumb or track on hover")
+	}
+	tt.ClickAt(150, 94)
+	if scroll.X != 0 {
+		t.Fatal("hidden track intercepted click")
+	}
+	tt.Press(150, 94)
+	tt.Move(100, 94)
+	tt.Release(100, 94)
+	if scroll.X != 50 {
+		t.Fatal("hidden track intercepted content drag")
+	}
+	tt.Scroll(100, 50, 80, 0)
+	if scroll.X != 130 {
+		t.Fatal("hiding scrollbar disabled wheel scrolling")
 	}
 }
 

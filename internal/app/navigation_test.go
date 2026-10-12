@@ -32,6 +32,7 @@ func TestDetailBackRestoresEntryPage(t *testing.T) {
 			a.items = []emby.Item{{ID: "cached", Name: "列表内容"}}
 			a.episodes = []emby.Item{{ID: "episode", Type: "Episode", Name: "当前集"}}
 			a.imagePending["episode:"], a.imagePending["series:"], a.imagePending["cached:"] = true, true, true
+			a.imagePending[emby.ImageKey(a.episodes[0])] = true
 			originalClient, originalContext := a.client, a.ctx
 			a.openDetail(a.episodes[0])
 			select {
@@ -53,8 +54,63 @@ func TestDetailBackRestoresEntryPage(t *testing.T) {
 			if a.detail.ID != "series" || a.season != "season2" || a.version != "version2" {
 				t.Fatal("nested detail context lost")
 			}
-			if a.client != originalClient || originalContext.Err() != nil || a.request <= request || a.busy || len(a.history) != 0 {
+			if a.client != originalClient || originalContext.Err() != nil || a.request <= request || a.busy != (page == "home") || len(a.history) != 0 {
 				t.Fatal("back left the service, kept a pending request active, or added history")
+			}
+		})
+	}
+}
+
+func TestBackToHomeAfterPlaybackWaitsForReport(t *testing.T) {
+	for _, via := range []string{"direct", "detail", "library"} {
+		t.Run(via, func(t *testing.T) {
+			a := testApp(t)
+			requests := make(chan string, 8)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests <- r.URL.Path
+				// Keep replies pending so this test only exercises navigation and
+				// request ordering, without background writes to headless UI state.
+				<-r.Context().Done()
+			}))
+			defer srv.Close()
+			defer a.cancel()
+			a.client, _ = emby.New(srv.URL, "token", "u", "d", 5)
+			a.page = "home"
+			a.sections = []section{{Title: "继续观看", Items: []emby.Item{{ID: "old"}}}}
+			a.rememberPage()
+			if via == "library" {
+				a.page, a.library = "library", "tv"
+				a.rememberPage()
+			}
+			if via != "direct" {
+				a.page, a.detail = "detail", emby.Item{ID: "episode", Type: "Episode"}
+				a.rememberPage()
+			}
+			a.page = "player"
+			done := make(chan struct{})
+			a.pendingReportDone = done
+			for a.page != "home" {
+				a.goBack()
+			}
+			if !a.busy || len(a.history) != 0 {
+				t.Fatal("home restored stale data without starting refresh")
+			}
+			select {
+			case path := <-requests:
+				t.Fatalf("request preceded final progress report: %s", path)
+			case <-time.After(30 * time.Millisecond):
+			}
+			close(done)
+			timeout := time.After(2 * time.Second)
+			for {
+				select {
+				case path := <-requests:
+					if path == "/Users/u/Views" {
+						return
+					}
+				case <-timeout:
+					t.Fatal("returning home did not reload after the report")
+				}
 			}
 		})
 	}

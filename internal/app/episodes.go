@@ -130,7 +130,7 @@ func (a *App) episodeShelf(c *ui.Context) {
 	left := min(max(0, a.episodeScroll.X), total)
 	first := max(0, int(left/stride)-2)
 	last := min(len(a.episodes), int(math.Ceil(float64((left+width)/stride)))+2)
-	ui.ScrollHorizontal(c.Key("episodes:" + a.season)).Height(240).AlignItems(ui.Start).PersistentScrollbars().TrackScroll(&a.episodeScroll).Label("剧集横排").Children(func() {
+	ui.ScrollHorizontal(c.Key("episodes:" + a.season)).DragScroll().HideScrollbars().Height(240).AlignItems(ui.Start).TrackScroll(&a.episodeScroll).Label("剧集横排").Children(func() {
 		ui.Box(c).Width(total).Height(212).Shrink(0).Children(func() {
 			for i := first; i < last; i++ {
 				ep := a.episodes[i]
@@ -151,7 +151,7 @@ func (a *App) episodeCard(c *ui.Context, ep emby.Item) {
 		}
 		button.Children(func() {
 			ui.Column(c).FillWidth().Gap(6).Children(func() {
-				a.poster(c, ep, 208, 117)
+				a.thumbnail(c, ep, 208, 117)
 				ui.Text(c, fmt.Sprintf("%d. %s", ep.IndexNumber, ep.Name)).SingleLine().Bold().FontSize(13)
 			})
 		})

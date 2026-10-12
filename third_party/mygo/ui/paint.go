@@ -808,6 +808,9 @@ func (p *Painter) drawBitmap(img *Bitmap, box Rect, fit Fit, radius [4]float32, 
 // scrollbars draws the thumbs of a scroll container whose content
 // overflows it.
 func (p *Painter) scrollbars(e *node) {
+	if e.hideScrollbars {
+		return
+	}
 	st := e.st
 	rt := e.c.rt
 	theme := e.c.theme

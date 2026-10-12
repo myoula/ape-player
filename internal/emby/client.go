@@ -124,21 +124,86 @@ func (c *Client) Played(ctx context.Context, id string, on bool) error {
 	return c.Do(ctx, m, "Users/"+c.UserID+"/PlayedItems/"+id, nil, nil, nil)
 }
 func (c *Client) Image(ctx context.Context, item Item) ([]byte, error) {
+	for _, candidate := range imageCandidates(item) {
+		data, err := c.primaryImage(ctx, candidate.id, candidate.tag)
+		if errors.Is(err, ErrImageNotFound) {
+			continue
+		}
+		return data, err
+	}
+	return nil, ErrImageNotFound
+}
+
+var ErrImageNotFound = errors.New("没有可用封面")
+
+type imageCandidate struct{ id, tag string }
+
+func imageCandidates(item Item) []imageCandidate {
+	var result []imageCandidate
+	add := func(id, tag string) {
+		if id == "" {
+			return
+		}
+		for _, old := range result {
+			if old.id == id {
+				return
+			}
+		}
+		result = append(result, imageCandidate{id, tag})
+	}
+	tag := item.ImageTags["Primary"]
+	if tag == "" {
+		tag = item.PrimaryImageTag
+	}
+	if item.Type == "Episode" || item.Type == "Season" {
+		add(item.SeriesID, item.SeriesPrimaryImageTag)
+		add(item.ParentPrimaryImageItemID, item.ParentPrimaryImageTag)
+		add(item.SeasonID, "")
+	}
+	add(item.ID, tag)
+	add(item.ParentPrimaryImageItemID, item.ParentPrimaryImageTag)
+	return result
+}
+
+// ImageKey includes inherited image tags, so updated series posters invalidate
+// an episode's cached fallback too.
+func ImageKey(item Item) string {
+	parts := make([]string, 0, 4)
+	for _, candidate := range imageCandidates(item) {
+		parts = append(parts, candidate.id+":"+candidate.tag)
+	}
+	return strings.Join(parts, "|")
+}
+
+func (c *Client) primaryImage(ctx context.Context, id, tag string) ([]byte, error) {
 	q := url.Values{"maxWidth": {"360"}, "quality": {"85"}}
-	if tag := item.ImageTags["Primary"]; tag != "" {
+	if tag != "" {
 		q.Set("tag", tag)
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.URL("Items/"+item.ID+"/Images/Primary", q), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.URL("Items/"+url.PathEscape(id)+"/Images/Primary", q), nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("X-Emby-Token", c.Token)
 	res, e := c.HTTP.Do(req)
 	if e != nil {
 		return nil, e
 	}
 	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		return nil, errors.New("没有封面")
+	if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusNoContent {
+		return nil, ErrImageNotFound
 	}
-	return io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
+		return nil, ErrUnauthorized
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("封面请求失败（HTTP %d）", res.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, (4<<20)+1))
+	if len(data) > 4<<20 {
+		return nil, errors.New("封面图片超过 4 MiB")
+	}
+	return data, err
 }
 
 // Resolve preserves server-provided paths and query strings, including reverse-proxy prefixes.

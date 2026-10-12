@@ -14,6 +14,7 @@ func (a *App) Smoke(file string) error {
 	var frames uint64
 	var pos float64
 	var tracks int
+	var cacheRanges int
 	a.onReady = func() {
 		if strings.HasPrefix(file, "emby:") {
 			a.activate(a.cfg.Active)
@@ -39,6 +40,7 @@ func (a *App) Smoke(file string) error {
 				frames = a.player.FrameCount()
 				pos = a.state.Position
 				tracks = len(a.state.Tracks)
+				cacheRanges = len(a.state.CacheRanges)
 				a.player.Command("set", "pause", "yes")
 				a.win.SetFullScreen(true)
 			})
@@ -85,7 +87,11 @@ func (a *App) Smoke(file string) error {
 						failure = "track switch failed"
 					}
 
-					fmt.Printf("gpu frames=%d position=%.2f tracks=%d hwdec=%s size=%dx%d dropped=%d\n", frames, a.state.Position, len(a.state.Tracks), a.state.HWDec, a.state.Width, a.state.Height, a.state.DroppedFrames)
+					cacheRanges = max(cacheRanges, len(a.state.CacheRanges))
+					if strings.HasPrefix(file, "emby:") && cacheRanges == 0 {
+						failure = "HTTP playback did not expose buffered ranges"
+					}
+					fmt.Printf("gpu frames=%d position=%.2f tracks=%d hwdec=%s size=%dx%d dropped=%d cache_ranges=%d\n", frames, a.state.Position, len(a.state.Tracks), a.state.HWDec, a.state.Width, a.state.Height, a.state.DroppedFrames, cacheRanges)
 				}
 				a.win.Close()
 			})

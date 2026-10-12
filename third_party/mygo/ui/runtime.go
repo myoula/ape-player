@@ -271,14 +271,15 @@ type engine struct {
 	// theme is the default theme, which follows the appearance and the
 	// preferences, made once until they change (themeOK); each pass
 	// starts from a copy, passTheme, which the view may change.
-	theme      Theme
-	themeOK    bool
-	passTheme  Theme
-	collect    bool
-	labels     []labelNode
-	tips       tooltips
-	scrollDrag scrollDrag
-	lastPress  struct {
+	theme       Theme
+	themeOK     bool
+	passTheme   Theme
+	collect     bool
+	labels      []labelNode
+	tips        tooltips
+	scrollDrag  scrollDrag
+	contentDrag contentDrag
+	lastPress   struct {
 		at     time.Time
 		x, y   float32
 		id     uint64
@@ -639,6 +640,10 @@ func (rt *engine) prune() {
 	unpressed := false
 	for id, s := range rt.states {
 		if s.seen != rt.frame || s.pass != rt.pass {
+			if rt.contentDrag.st == s || (rt.pressed == s && !rt.contentDrag.active) {
+				rt.cancelContentDrag()
+				unpressed = true
+			}
 			if rt.pressed == s {
 				rt.pressed, unpressed = nil, true
 			}
@@ -853,6 +858,11 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 		s.parent = 0
 	}
 	s.flags = e.flags
+	s.dragScroll = e.dragScroll
+	s.hideScrollbars = e.hideScrollbars
+	if s.hideScrollbars && rt.scrollDrag.st == s {
+		rt.scrollDrag.st = nil
+	}
 	s.anchor = 0
 	if e.popover != nil {
 		s.anchor = e.popover.id

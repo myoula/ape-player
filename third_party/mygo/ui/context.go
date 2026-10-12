@@ -501,6 +501,8 @@ type state struct {
 	// scrollX and scrollY are float64, as the content a List scrolls
 	// may be taller than float32 counts to a fraction of a DIP.
 	scrollX, scrollY float64
+	dragScroll       bool
+	hideScrollbars   bool
 	contentW         float64
 	contentH         float64
 	// barInset is the element's ScrollbarInsets.

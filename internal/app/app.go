@@ -57,6 +57,7 @@ type App struct {
 	imagePending                                         map[string]bool
 	imageLastUsed                                        map[string]uint64
 	imageFrame                                           uint64
+	imageSlots                                           chan struct{}
 	player                                               *player.Player
 	bitmap                                               *ui.Bitmap
 	playback                                             emby.Playback
@@ -88,6 +89,7 @@ func New() (*App, error) {
 	a := &App{cfg: c, configPath: config.Path(), page: "sources", sort: "最近添加", kind: "全部类型", watched: "全部状态", speed: "1.0", aspectRatio: "原始比例", images: map[string]*ui.Bitmap{}, imagePending: map[string]bool{}, remember: true}
 	a.theme = ui.DarkTheme()
 	a.imageLastUsed = map[string]uint64{}
+	a.imageSlots = make(chan struct{}, 6)
 	a.theme.Background = ui.Hex("#101217")
 	a.theme.Surface = ui.Hex("#1b1e27")
 	a.theme.Accent = ui.Hex("#c8ef80")
@@ -494,9 +496,14 @@ func (a *App) toggleFavorite(item emby.Item) {
 	}()
 }
 func (a *App) togglePlayed(item emby.Item) {
+	a.setPlayed(item, !item.UserData.Played)
+}
+func (a *App) setPlayed(item emby.Item, on bool) {
+	if a.client == nil {
+		return
+	}
 	c, ctx := a.client, a.ctx
 	gen := a.generation
-	on := !item.UserData.Played
 	go func() {
 		e := c.Played(ctx, item.ID, on)
 		a.update(func() {
@@ -507,7 +514,15 @@ func (a *App) togglePlayed(item emby.Item) {
 				a.failure(e)
 				return
 			}
-			a.mutateItem(item.ID, func(i *emby.Item) { i.UserData.Played = on })
+			a.mutateItem(item.ID, func(i *emby.Item) {
+				i.UserData.Played = on
+				i.UserData.PlaybackPositionTicks = 0
+				i.UserData.PlayedPercentage = 0
+				if on {
+					i.UserData.PlayedPercentage = 100
+				}
+			})
+			a.filterResumeSections()
 		})
 	}()
 }

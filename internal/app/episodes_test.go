@@ -128,6 +128,7 @@ func TestEpisodePickerSeasonChangeClearsOldEpisodes(t *testing.T) {
 	defer a.cancel()
 	a.client, _ = emby.New(srv.URL, "token", "u", "d", 5)
 	a.imagePending["series:"] = true
+	a.imagePending[emby.ImageKey(a.detail)] = true
 	for _, ep := range a.episodes {
 		a.imagePending[ep.ID+":"] = true
 	}
@@ -206,7 +207,7 @@ func TestEpisodeShelfLazilyLoadsPosters(t *testing.T) {
 	}
 }
 
-func TestEpisodeScrollbarVisibleAndDraggable(t *testing.T) {
+func TestEpisodeScrollbarHiddenAndContentDraggable(t *testing.T) {
 	a := episodeDetailFixture(t, 1000)
 	tt := ui.NewTester(a.view, 1280, 900)
 	row, ok := tt.Find("剧集横排")
@@ -215,22 +216,56 @@ func TestEpisodeScrollbarVisibleAndDraggable(t *testing.T) {
 	}
 	x, y := row.X+12, row.Y+row.H-6
 	tt.Move(20, 20)
-	if tt.Image().RGBAAt(int(x), int(y)).R < 50 {
-		t.Fatal("scrollbar is invisible before hovering the shelf")
+	if tt.Image().RGBAAt(int(x), int(y)).R >= 50 {
+		t.Fatal("scrollbar should be hidden")
 	}
-	saveEpisodePreview(t, tt, "episode-scrollbar.png")
+	tt.Move(x, y)
+	if tt.Image().RGBAAt(int(x), int(y)).R >= 50 {
+		t.Fatal("hover revealed hidden scrollbar")
+	}
+	// The old track is now ordinary draggable space, not a paging target.
+	x = row.X + row.W/2
+	tt.ClickAt(x, y)
+	if a.episodeScroll.X != 0 {
+		t.Fatal("hidden track still handles clicks")
+	}
 	tt.Press(x, y)
-	tt.Move(row.X+row.W-3, y)
-	tt.Release(row.X+row.W-3, y)
-	if a.episodeScroll.X != a.episodeScroll.MaxX || !tt.HasText("播放剧集："+title(a.episodes[999])) {
-		t.Fatal("dragging the scrollbar did not reveal the last episode")
+	tt.Move(x-100, y)
+	tt.Release(x-100, y)
+	if a.episodeScroll.X != 100 {
+		t.Fatal("empty space must drag the content")
 	}
-	tt.Move(20, 20)
-	if tt.Image().RGBAAt(int(row.X+row.W-12), int(y)).R < 50 {
-		t.Fatal("scrollbar disappeared after dragging")
+	tt.Scroll(x, y, a.episodeScroll.MaxX, 0)
+	if a.episodeScroll.X != a.episodeScroll.MaxX || !tt.HasText("播放剧集："+title(a.episodes[999])) {
+		t.Fatal("scrolling did not reveal the last episode")
+	}
+	if tt.Image().RGBAAt(int(row.X+row.W-12), int(y)).R >= 50 {
+		t.Fatal("scrollbar appeared after scrolling")
 	}
 	if a.page != "detail" || a.busy {
-		t.Fatal("dragging scrollbar triggered playback")
+		t.Fatal("scrolling triggered playback")
+	}
+}
+
+func TestEpisodeShelfContentDrag(t *testing.T) {
+	a := episodeDetailFixture(t, 1000)
+	tt := ui.NewTester(a.view, 1280, 900)
+	card, ok := tt.Find("播放剧集：" + title(a.episodes[1]))
+	if !ok {
+		t.Fatal("episode card missing")
+	}
+	x, y := card.X+100, card.Y+30
+	tt.Press(x, y)
+	// Cross the virtualization boundary, then keep dragging after the pressed
+	// card leaves the view. Release must not select or start another episode.
+	tt.Move(x-1000, y)
+	tt.Move(x-1600, y)
+	tt.Release(x-1600, y)
+	if a.episodeScroll.X != 1600 || !tt.HasText("播放剧集："+title(a.episodes[10])) {
+		t.Fatalf("drag did not load later cards: %+v", a.episodeScroll)
+	}
+	if a.page != "detail" || a.busy || a.playback.Item.ID != a.episodes[0].ID {
+		t.Fatal("dragging changed playback")
 	}
 }
 
@@ -262,6 +297,7 @@ func TestEpisodeSelectionStartsChosenEpisode(t *testing.T) {
 			a.client, _ = emby.New(srv.URL, "token", "u", "d", 5)
 			// Fixtures use placeholders without starting asynchronous image loads.
 			a.imagePending["series:"] = true
+			a.imagePending[emby.ImageKey(a.detail)] = true
 			for _, ep := range a.episodes {
 				a.imagePending[ep.ID+":"] = true
 			}

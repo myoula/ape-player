@@ -17,6 +17,16 @@
 
 ## 常驻滚动条
 
-新增 `ui.Element.PersistentScrollbars()`，内容溢出时始终绘制滑块与淡色轨道，保留原有拖动和点击轨道翻页行为。未启用的容器仍仅在悬停或拖动时显示。分集横排启用该选项，并在简介下方预留滚动条空间。
+新增 `ui.Element.PersistentScrollbars()`，内容溢出时始终绘制滑块与淡色轨道，保留原有拖动和点击轨道翻页行为。未启用的容器仍仅在悬停或拖动时显示。该选项可按容器启用；应用分集横排目前使用下文的隐藏滚动条选项。
 
-修改 `ui/element.go`、`ui/paint.go`，通过 `go generate ./ui` 更新 `ui/api_gen.go`。`TestPersistentScrollbars` 验证非悬停绘制、拖动、默认隐藏行为与内容不溢出时不显示；应用测试验证拖至第 1000 集及鼠标离开后保持可见。
+修改 `ui/element.go`、`ui/paint.go`，通过 `go generate ./ui` 更新 `ui/api_gen.go`。`TestPersistentScrollbars` 验证非悬停绘制、拖动、默认隐藏行为与内容不溢出时不显示；应用测试现验证隐藏滚动条后仍能拖动内容并滚动至第 1000 集。
+
+## 横向内容拖动
+
+新增 `ui.Element.DragScroll()`，为横向滚动容器启用鼠标左键拖动内容。水平位移超过 6 DIP 且大于垂直位移后接管手势并取消子卡片点击；轻点、右键菜单、滚轮与滚动条保持原行为，输入框、滑块及自带拖动的控件优先处理自己的输入。偏移同步至 `TrackScroll`，虚拟子卡片离开视图不打断拖动；失焦、容器移除或禁用时取消手势。未启用的容器行为不变，不添加惯性滚动。
+
+修改 `ui/element.go`、`ui/context.go`、`ui/runtime.go`、`ui/input.go`，新增 `ui/scroll_drag.go`，生成 `ui/api_gen.go`。`TestDragScroll*` 覆盖点击阈值、边界、右键、手势取消、虚拟列表、滑块与滚轮；应用在首页和分集横排启用该选项。
+
+## 隐藏滚动条
+
+新增 `ui.Element.HideScrollbars()`，按容器关闭滚动条绘制及轨道命中，优先于 PersistentScrollbars；不影响滚轮、触控板、键盘或 DragScroll。首页和分集横排启用，其他容器保持原行为。修改 element/context/runtime/paint/input 并重新生成 api_gen.go；扩展既有滚动条测试，验证悬停隐藏、轨道不再翻页、拖动及滚轮正常。

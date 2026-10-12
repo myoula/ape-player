@@ -35,6 +35,7 @@ type State struct {
 	Position, Duration, Volume float64
 	Paused, Buffering, Muted   bool
 	Tracks                     []Track
+	CacheRanges                []CacheRange
 	HWDec                      string
 	VideoCodec, AudioCodec     string
 }
@@ -248,6 +249,7 @@ func (p *Player) state() State {
 	s.VideoCodec = p.get("video-format")
 	s.AudioCodec = p.get("audio-codec-name")
 	_ = json.Unmarshal([]byte(p.get("track-list")), &s.Tracks)
+	s.CacheRanges = parseCacheRanges(p.get("demuxer-cache-state"))
 	return s
 }
 func (p *Player) loop() {

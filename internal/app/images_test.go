@@ -1,13 +1,73 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"image"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"ape-player/internal/emby"
 	"github.com/egoist/mygo/ui"
 )
+
+func TestPosterRecoversFromCorruptCacheAndTemporaryFailure(t *testing.T) {
+	var calls atomic.Int32
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 2, 3))); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(503)
+			return
+		}
+		w.Write(data.Bytes())
+	}))
+	defer srv.Close()
+	c, _ := emby.New(srv.URL, "", "u", "d", 5)
+	file := filepath.Join(t.TempDir(), "poster")
+	if err := os.WriteFile(file, []byte("corrupt image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	slots := make(chan struct{}, 1)
+	item := emby.Item{ID: "movie"}
+	bitmap, err := loadPoster(context.Background(), c, item, file, slots)
+	if err != nil || bitmap == nil || calls.Load() != 2 {
+		t.Fatalf("recovery failed: bitmap=%v err=%v calls=%d", bitmap, err, calls.Load())
+	}
+	if _, err = loadPoster(context.Background(), c, item, file, slots); err != nil || calls.Load() != 2 {
+		t.Fatal("valid cache should avoid network requests")
+	}
+}
+
+func TestEpisodeThumbnailsUseEpisodeImages(t *testing.T) {
+	a := testApp(t)
+	ep := emby.Item{ID: "episode", Type: "Episode", SeriesID: "series", SeasonID: "season", ImageTags: map[string]string{"Primary": "episode-tag"}, SeriesPrimaryImageTag: "series-tag"}
+	bitmap := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 2, 3)))
+	a.images[emby.ImageKey(ep)] = bitmap
+	a.images["episode:episode-tag"] = bitmap
+	tt := ui.NewTester(func(c *ui.Context) { a.thumbnail(c, ep, 208, 117) }, 300, 200)
+	if _, placeholder := tt.Find("APE"); placeholder {
+		t.Fatal("episode thumbnail used series poster key")
+	}
+	if _, used := a.imageLastUsed["episode:episode-tag"]; !used {
+		t.Fatal("thumbnail must use episode image")
+	}
+	tt = ui.NewTester(func(c *ui.Context) { a.poster(c, ep, 156, 222) }, 300, 300)
+	if _, placeholder := tt.Find("APE"); placeholder {
+		t.Fatal("portrait card used thumbnail key")
+	}
+	if _, used := a.imageLastUsed[emby.ImageKey(ep)]; !used {
+		t.Fatal("portrait card must use inherited poster")
+	}
+}
 
 func TestLargeHomePostersStayLoaded(t *testing.T) {
 	a := testApp(t)

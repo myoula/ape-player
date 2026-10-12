@@ -43,27 +43,30 @@ type MediaSource struct {
 	RunTimeTicks               int64
 }
 type Item struct {
-	CollectionType    string
-	ID                string `json:"Id"`
-	Name              string
-	Type              string
-	Overview          string
-	ProductionYear    int
-	PremiereDate      time.Time
-	EndDate           time.Time
-	Status            string
-	CommunityRating   float64
-	RunTimeTicks      int64
-	SeriesName        string
-	SeriesID          string `json:"SeriesId"`
-	SeasonID          string `json:"SeasonId"`
-	IndexNumber       int
-	ParentIndexNumber int
-	ImageTags         map[string]string
-	PrimaryImageTag   string
-	UserData          UserData
-	MediaSources      []MediaSource
-	MediaStreams      []Stream
+	CollectionType           string
+	ID                       string `json:"Id"`
+	Name                     string
+	Type                     string
+	Overview                 string
+	ProductionYear           int
+	PremiereDate             time.Time
+	EndDate                  time.Time
+	Status                   string
+	CommunityRating          float64
+	RunTimeTicks             int64
+	SeriesName               string
+	SeriesID                 string `json:"SeriesId"`
+	SeasonID                 string `json:"SeasonId"`
+	IndexNumber              int
+	ParentIndexNumber        int
+	ImageTags                map[string]string
+	PrimaryImageTag          string
+	SeriesPrimaryImageTag    string
+	ParentPrimaryImageItemID string `json:"ParentPrimaryImageItemId"`
+	ParentPrimaryImageTag    string
+	UserData                 UserData
+	MediaSources             []MediaSource
+	MediaStreams             []Stream
 }
 type Items struct {
 	Items            []Item

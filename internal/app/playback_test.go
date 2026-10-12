@@ -194,7 +194,7 @@ func TestDetailRestartAndResume(t *testing.T) {
 				defer close(release)
 				defer a.cancel()
 				a.client, _ = emby.New(srv.URL, "token", "u", "d", 5)
-				a.imagePending["item:"] = true
+				a.imagePending[emby.ImageKey(a.detail)] = true
 				tt := ui.NewTester(a.view, 1280, 900)
 				choose := func(control, value string) {
 					t.Helper()

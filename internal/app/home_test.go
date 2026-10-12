@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -19,8 +20,44 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestHomeShelfDragKeepsCardClickAndMenu(t *testing.T) {
+	a := testApp(t)
+	a.page = "home"
+	items := make([]emby.Item, 18)
+	for i := range items {
+		items[i] = emby.Item{ID: fmt.Sprint(i), Name: fmt.Sprintf("影片%d", i), Type: "Movie"}
+		a.imagePending[emby.ImageKey(items[i])] = true
+	}
+	a.sections = []section{{Title: "继续观看", Items: items}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer srv.Close()
+	defer a.cancel()
+	a.client, _ = emby.New(srv.URL, "token", "u", "d", 5)
+	tt := ui.NewTester(a.view, 1280, 900)
+	label := "查看详情：" + title(items[1])
+	before, ok := tt.Find(label)
+	if !ok {
+		t.Fatal("poster missing")
+	}
+	x, y := before.X+before.W/2, before.Y+60
+	tt.Press(x, y)
+	tt.Move(x-90, y)
+	tt.Release(x-90, y)
+	after, _ := tt.Find(label)
+	if after.X != before.X-90 || a.page != "home" || a.busy {
+		t.Fatalf("shelf did not pan or opened detail: before=%+v after=%+v page=%s", before, after, a.page)
+	}
+	if err := tt.RightClick(label); err != nil || len(tt.Menu()) == 0 {
+		t.Fatalf("drag broke context menu: %v", err)
+	}
+	tt.CloseMenu()
+	if err := tt.Click(label); err != nil || a.page != "detail" || a.detail.ID != items[1].ID {
+		t.Fatalf("click after dragging did not open detail: %v", err)
+	}
+}
+
 func TestHomeCategoryNavigationResetsFilters(t *testing.T) {
-	for _, tc := range []struct{ label, library, kind string }{{"分类：电影", "", "电影"}, {"分类：剧集", "", "剧集"}, {"媒体库分类：动画", "anime", "剧集"}, {"查看所有：动画", "anime", "剧集"}} {
+	for _, tc := range []struct{ label, library, kind string }{{"查看所有：动画", "anime", "剧集"}} {
 		t.Run(tc.label, func(t *testing.T) {
 			a := testApp(t)
 			a.page = "home"
@@ -51,13 +88,18 @@ func TestHomeContinueWatchingView(t *testing.T) {
 		{ID: "recent", Name: "未看完的电影", ProductionYear: 2026, RunTimeTicks: 1000 * emby.TicksPerSecond, UserData: emby.UserData{PlaybackPositionTicks: 400 * emby.TicksPerSecond, LastPlayedDate: time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)}},
 	}}}
 	tt := ui.NewTester(a.view, 1280, 900)
-	for _, s := range []string{"分类", "继续观看", "未看完的电影", "观看进度"} {
+	for _, s := range []string{"继续观看", "未看完的电影", "观看进度"} {
 		if !tt.HasText(s) {
 			t.Errorf("missing %s", s)
 		}
 	}
 	if tt.HasText("最近播放") {
 		t.Fatal("duplicate history shelf remains visible")
+	}
+	for _, label := range []string{"分类", "我的媒体库", "分类：全部媒体", "媒体库分类：动画"} {
+		if _, found := tt.Find(label); found {
+			t.Fatalf("removed home category panel still shows %s", label)
+		}
 	}
 	if dir := os.Getenv("APE_TEST_ARTIFACTS"); dir != "" {
 		if e := os.MkdirAll(dir, 0755); e != nil {
@@ -85,7 +127,7 @@ func TestHomePartialFailurePreservesCategoriesAndHistory(t *testing.T) {
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"movies","Name":"电影","CollectionType":"movies"}]}`))
 		case r.URL.Query().Get("SortBy") == "DatePlayed":
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"recent","UserData":{"LastPlayedDate":"2026-10-12T08:00:00Z"}}]}`))
-		case r.URL.Query().Get("SortBy") == "DateCreated" && r.URL.Query().Get("ParentId") == "":
+		case r.URL.Query().Get("ParentId") == "movies":
 			w.WriteHeader(500)
 		default:
 			_, _ = w.Write([]byte(`{"Items":[]}`))
@@ -97,7 +139,7 @@ func TestHomePartialFailurePreservesCategoriesAndHistory(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(data.libraries) != 1 || len(data.sections) != 3 || len(data.sections[0].Items) != 1 {
+	if len(data.libraries) != 1 || len(data.sections) != 2 || len(data.sections[0].Items) != 1 {
 		t.Fatalf("lost successful sections: %+v", data)
 	}
 	if data.sections[1].Error == "" {
@@ -131,7 +173,7 @@ func TestHomeWaitsForReportAndCanCancel(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not refresh after report")
 	}
-	if count.Load() != 4 {
+	if count.Load() != 3 {
 		t.Fatalf("expected all sections, got %d requests", count.Load())
 	}
 	blocked := make(chan struct{})
@@ -155,6 +197,9 @@ func TestHomeLibraryShelves(t *testing.T) {
 		}
 		parent := r.URL.Query().Get("ParentId")
 		if parent == "" {
+			if r.URL.Query().Get("SortBy") == "DateCreated" {
+				t.Error("removed recently added shelf still requested")
+			}
 			json.NewEncoder(w).Encode(emby.Items{})
 			return
 		}
@@ -186,11 +231,11 @@ func TestHomeLibraryShelves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data.sections) != 6 {
+	if len(data.sections) != 5 {
 		t.Fatalf("missing shelves: %d", len(data.sections))
 	}
 	for i, library := range libraries {
-		shelf := data.sections[i+2]
+		shelf := data.sections[i+1]
 		if shelf.LibraryID != library.ID || shelf.Title != library.Name || shelf.Kind != libraryKind(library) {
 			t.Fatalf("wrong shelf order or navigation: %+v", shelf)
 		}
@@ -205,7 +250,7 @@ func TestHomeLibraryShelves(t *testing.T) {
 	a := testApp(t)
 	a.page = "home"
 	a.libraries = data.libraries
-	a.sections = data.sections[2:]
+	a.sections = data.sections[1:]
 	tt := ui.NewTester(a.view, 1280, 900)
 	for _, library := range libraries {
 		if !tt.HasText("查看所有：" + library.Name) {

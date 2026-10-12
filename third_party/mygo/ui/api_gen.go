@@ -2945,6 +2945,19 @@ func (_handle Element) DragOffset() Point {
 	return _node.DragOffset()
 }
 
+// DragScroll allows primary-pointer dragging to pan overflowing horizontal
+// content. Movement must exceed 6 DIPs horizontally before it cancels a child
+// click. Controls with their own drag or text input keep their usual behavior.
+func (_handle Element) DragScroll() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.DragScroll())
+}
+
 // DragVelocity returns how fast, in DIPs per second along the element's
 // local axes, the pointer pressing the element moves now: zero once it
 // stops for a moment, or while nothing presses the element.
@@ -3454,6 +3467,19 @@ func (_handle Element) HeightPercent(p float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.HeightPercent(p))
+}
+
+// HideScrollbars hides this container's scrollbars and disables their pointer
+// hit targets. Wheel, keyboard and DragScroll scrolling remain available.
+// This takes precedence over PersistentScrollbars.
+func (_handle Element) HideScrollbars() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.HideScrollbars())
 }
 
 // Highlighted reports whether an option of a select is the one the pointer

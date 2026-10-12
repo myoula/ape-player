@@ -81,6 +81,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.blinkStart = time.Now()
 		rt.requestFrame()
 	case platform.SurfaceBlur:
+		rt.cancelContentDrag()
 		rt.windowFocused = false
 		rt.selection.dragging = false
 		// Keys let go of elsewhere never come back up here.
@@ -177,6 +178,9 @@ func (rt *engine) setHover(chain []uint64) bool {
 }
 
 func (rt *engine) pointerMove(x, y float32) {
+	if rt.moveContentDrag(x, y) {
+		return
+	}
 	if d := &rt.scrollDrag; d.st != nil {
 		s := d.st
 		g := d.bars(rt.c.theme.scrollbarWidth())
@@ -245,6 +249,10 @@ func (rt *engine) pointerMove(x, y float32) {
 const interactive = flagClickable | flagFocusable | flagEditable | flagSelectable | flagDragWindow | flagDraggable | flagTrackPointer
 
 func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, count int) {
+	if rt.contentDrag.active {
+		return
+	}
+	rt.cancelContentDrag()
 	chain := rt.hitChain(x, y)
 	rt.setHover(chain)
 	if len(chain) > 0 {
@@ -295,6 +303,9 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, count in
 	if button == 1 && rt.menuPress(chain, x, y) {
 		return
 	}
+	if button == 0 {
+		rt.beginContentDrag(chain, x, y)
+	}
 	rt.requestFrame()
 	if target == nil {
 		return
@@ -339,6 +350,15 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, count in
 }
 
 func (rt *engine) pointerUp(button, clicks int) {
+	if button == 0 && rt.contentDrag.st != nil {
+		active := rt.contentDrag.active
+		rt.cancelContentDrag()
+		if active {
+			rt.setHover(rt.hitChain(rt.pointerX, rt.pointerY))
+			rt.requestFrame()
+			return
+		}
+	}
 	if rt.scrollDrag.st != nil {
 		rt.scrollDrag.st = nil
 		rt.requestFrame()
@@ -1261,7 +1281,7 @@ func (e *node) Dismissed() bool { return e.dismissed }
 func (rt *engine) scrollbarPress(chain []uint64, x, y float32) bool {
 	for _, id := range chain {
 		s := rt.states[id]
-		if s == nil || s.flags&(flagScrollX|flagScrollY) == 0 {
+		if s == nil || s.hideScrollbars || s.flags&(flagScrollX|flagScrollY) == 0 {
 			continue
 		}
 		lx, ly := s.local(x, y)

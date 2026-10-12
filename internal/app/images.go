@@ -1,18 +1,22 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
+	"ape-player/internal/diagnostics"
 	"ape-player/internal/emby"
 	"github.com/egoist/mygo/ui"
 )
 
 func (a *App) poster(c *ui.Context, item emby.Item, w, h float32) {
-	key := item.ID + ":" + item.ImageTags["Primary"]
+	key := emby.ImageKey(item)
 	a.imageLastUsed[key] = a.imageFrame
 	if b := a.images[key]; b != nil {
 		ui.Image(c, b).Size(w, h).Fit(ui.Cover).Radius(8)
@@ -32,17 +36,9 @@ func (a *App) poster(c *ui.Context, item emby.Item, w, h float32) {
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(a.cfg.Active+":"+capi.UserID+":"+key)))
 	file := filepath.Join(cache, "ape-player", "posters", hash)
 	go func() {
-		b, e := os.ReadFile(file)
-		if e != nil {
-			b, e = capi.Image(ctx, item)
-			if e == nil {
-				_ = os.MkdirAll(filepath.Dir(file), 0700)
-				_ = os.WriteFile(file, b, 0600)
-			}
-		}
-		var bitmap *ui.Bitmap
-		if e == nil {
-			bitmap, e = ui.DecodeBitmap(b)
+		bitmap, e := loadPoster(ctx, capi, item, file, a.imageSlots)
+		if e != nil && ctx.Err() == nil {
+			diagnostics.Log("poster.load_failed", "item_id", item.ID, "error", e)
 		}
 		a.update(func() {
 			if e == nil {
@@ -50,6 +46,60 @@ func (a *App) poster(c *ui.Context, item emby.Item, w, h float32) {
 			}
 		})
 	}()
+}
+
+// Episode shelves show scene thumbnails; portrait cards use series/season art.
+func (a *App) thumbnail(c *ui.Context, item emby.Item, w, h float32) {
+	item.Type, item.SeriesID, item.SeasonID = "", "", ""
+	item.ParentPrimaryImageItemID, item.ParentPrimaryImageTag = "", ""
+	a.poster(c, item, w, h)
+}
+
+// Limit simultaneous image work and retry transient failures without triggering
+// requests on every frame. Failed or corrupt responses never enter disk cache.
+func loadPoster(ctx context.Context, client *emby.Client, item emby.Item, file string, slots chan struct{}) (*ui.Bitmap, error) {
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if data, err := os.ReadFile(file); err == nil {
+		if bitmap, err := ui.DecodeBitmap(data); err == nil {
+			return bitmap, nil
+		}
+		_ = os.Remove(file)
+	}
+	var err error
+	for attempt := range 3 {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Duration(attempt) * time.Second)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			}
+		}
+		var data []byte
+		data, err = client.Image(ctx, item)
+		if err == nil {
+			var bitmap *ui.Bitmap
+			bitmap, err = ui.DecodeBitmap(data)
+			if err == nil {
+				_ = os.MkdirAll(filepath.Dir(file), 0700)
+				_ = os.WriteFile(file, data, 0600)
+				return bitmap, nil
+			}
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if errors.Is(err, emby.ErrImageNotFound) || errors.Is(err, emby.ErrUnauthorized) {
+			break
+		}
+	}
+	return nil, err
 }
 
 const posterCacheLimit = 160

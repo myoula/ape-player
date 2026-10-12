@@ -64,6 +64,7 @@ func (a *App) goBack() {
 	a.detailAudio, a.detailSub = entry.detailAudio, entry.detailSub
 	a.offset, a.total, a.detail = entry.offset, entry.total, entry.detail
 	a.items, a.seasons, a.episodes, a.sections = entry.items, entry.seasons, entry.episodes, entry.sections
+	a.filterResumeSections()
 	a.grid, a.episodeGrid = ui.GridState{}, ui.GridState{}
 	a.episodeScroll = ui.ScrollState{X: entry.episodeX}
 	if entry.busy {
@@ -77,8 +78,10 @@ func (a *App) goBack() {
 		}
 		return
 	}
-	if wasPlayer && a.page == "home" {
-		a.loadHome() // Refresh Continue Watching after the stop report finishes.
+	if a.page == "home" {
+		// Back may pass through detail or library after playback. Cached home
+		// entries predate that play; always refresh after the last stop report.
+		a.loadHome()
 	} else if wasPlayer && a.page == "detail" && a.client != nil {
 		a.refreshDetailAfterPlayback()
 	}

@@ -346,6 +346,8 @@ type node struct {
 	barInset [4]float32
 	// persistentScrollbars keeps overflowing scrollbars visible without hover.
 	persistentScrollbars bool
+	hideScrollbars       bool
+	dragScroll           bool
 	// scrollBase is the offset of a List's content that its rows were
 	// placed at: placing moves them by how far the offset moved since.
 	scrollBase float64
@@ -620,6 +622,16 @@ func (e *node) ScrollbarInsets(v ...float32) *node { e.barInset = edges(v); retu
 // PersistentScrollbars shows scrollbars and their tracks whenever content
 // overflows, even when the pointer is outside the scroll container.
 func (e *node) PersistentScrollbars() *node { e.persistentScrollbars = true; return e }
+
+// HideScrollbars hides this container's scrollbars and disables their pointer
+// hit targets. Wheel, keyboard and DragScroll scrolling remain available.
+// This takes precedence over PersistentScrollbars.
+func (e *node) HideScrollbars() *node { e.hideScrollbars = true; return e }
+
+// DragScroll allows primary-pointer dragging to pan overflowing horizontal
+// content. Movement must exceed 6 DIPs horizontally before it cancels a child
+// click. Controls with their own drag or text input keep their usual behavior.
+func (e *node) DragScroll() *node { e.dragScroll = true; return e }
 
 // Width sets the width in DIPs.
 func (e *node) Width(v float32) *node { e.width = px(v); return e }

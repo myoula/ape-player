@@ -2,6 +2,18 @@
 
 Linux 桌面 Emby 播放器。界面完全使用 **MyGO Native UI**，视频由 **libmpv + OpenGL** 内嵌渲染，无 WebView、JavaScript 或外部播放窗口。界面采用 [Lucide](https://lucide.dev/) SVG 图标，由 MyGO 原生渲染，随程序离线打包。
 
+## 界面预览
+
+从添加来源、浏览分类到选集播放。点击截图查看原图。
+
+| 来源管理与账号登录 | 首页分类与继续观看 |
+| --- | --- |
+| [![来源管理：添加 Emby 来源及账号密码配置](preview/source.png)](preview/source.png) | [![首页：媒体库分类、继续观看与播放进度](preview/list.png)](preview/list.png) |
+
+| 影片详情与选集 | 原生视频播放 |
+| --- | --- |
+| [![影片详情：视频版本、音轨、字幕选择及分集卡片](preview/video.png)](preview/video.png) | [![播放器：视频画面、播放进度和图标控制栏](preview/player.png)](preview/player.png) |
+
 ## 运行
 
 需要 Go 1.27.1+、GTK 3、libepoxy、OpenGL 驱动和 `libmpv.so.2`。首次构建需要下载 Go 依赖。

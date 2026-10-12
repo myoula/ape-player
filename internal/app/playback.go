@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -20,20 +21,30 @@ type report struct {
 	playback emby.Playback
 }
 type reporter struct {
-	ch   chan report
-	stop chan report
-	done chan struct{}
+	ch            chan report
+	stop          chan report
+	done          chan struct{}
+	cancelPending context.CancelFunc
 }
 
 func newReporter(c *emby.Client, notify func(error)) *reporter {
-	r := &reporter{make(chan report, 1), make(chan report, 1), make(chan struct{})}
+	pendingCtx, cancelPending := context.WithCancel(context.Background())
+	r := &reporter{ch: make(chan report, 1), stop: make(chan report, 1), done: make(chan struct{}), cancelPending: cancelPending}
 	go func() {
 		defer close(r.done)
+		defer cancelPending()
 		send := func(s report) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			parent, timeout := pendingCtx, c.HTTP.Timeout
+			if timeout <= 0 {
+				timeout = 20 * time.Second
+			}
+			if s.event == "/Stopped" {
+				parent, timeout = context.Background(), 5*time.Second
+			}
+			ctx, cancel := context.WithTimeout(parent, timeout)
 			e := c.Report(ctx, s.event, s.playback, s.position, s.paused)
 			cancel()
-			if e != nil && notify != nil {
+			if notify != nil && !errors.Is(e, context.Canceled) {
 				notify(e)
 			}
 		}
@@ -70,6 +81,7 @@ func (a *App) report(event string) {
 		a.pendingReportDone = a.reporting.done
 		select {
 		case a.reporting.stop <- r:
+			a.reporting.cancelPending()
 		default:
 		}
 		return
@@ -81,6 +93,7 @@ func (a *App) report(event string) {
 }
 func (a *App) stopPlayback() {
 	a.playbackSerial++
+	a.reportMessage = ""
 	a.mediaLoading = false
 	if a.player != nil {
 		a.player.Command("stop")
@@ -298,11 +311,10 @@ func (a *App) playerEvent(e player.Event) {
 		}
 		if a.playback.Method != "Local" {
 			p := a.player
+			serial := a.playbackSerial
 			a.reporting = newReporter(a.client, func(e error) {
 				a.update(func() {
-					if a.player == p {
-						a.message = "播放进度同步失败：" + e.Error()
-					}
+					a.reportResult(p, serial, e)
 				})
 			})
 			a.report("")
@@ -373,6 +385,17 @@ func (a *App) playerEvent(e player.Event) {
 	case "playback-error":
 		a.stopPlayback()
 		a.failure(e.Err)
+	}
+}
+func (a *App) reportResult(p *player.Player, serial uint64, err error) {
+	if a.player != p || a.playbackSerial != serial {
+		return
+	}
+	a.reportMessage = ""
+	if errors.Is(err, emby.ErrUnauthorized) {
+		a.reportMessage = "播放进度未同步：登录已过期，请重新登录"
+	} else if err != nil {
+		a.reportMessage = "播放进度暂未同步，将自动重试"
 	}
 }
 func (a *App) seek(seconds float64) {

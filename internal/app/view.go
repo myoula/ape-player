@@ -445,6 +445,12 @@ func (a *App) playerView(c *ui.Context) {
 						iconButton(c, "x", "关闭提示").OnClick(func() { a.message = "" })
 					})
 				}
+				if a.reportMessage != "" {
+					ui.Row(c).Gap(10).Children(func() {
+						ui.Text(c, a.reportMessage).Grow(1).FontSize(12).TextColor(ui.Hex("#f3bd80"))
+						iconButton(c, "x", "关闭同步提示").OnClick(func() { a.reportMessage = "" })
+					})
+				}
 				pos := a.state.Position
 				ui.Slider(c, &pos, 0, max(1, a.state.Duration)).Label("播放进度").Disabled(a.player == nil).OnChange(func() { a.seek(pos) })
 				ui.Row(c).Gap(10).AlignItems(ui.Center).Wrap().Children(func() {

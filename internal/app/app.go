@@ -63,6 +63,7 @@ type App struct {
 	subDelay                                             float64
 	controlsHidden                                       bool
 	reporting                                            *reporter
+	reportMessage                                        string
 	pendingReportDone                                    <-chan struct{}
 	releaseAwake                                         func()
 	playbackSerial                                       uint64

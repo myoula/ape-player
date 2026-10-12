@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ func TestPrivateRedactedLogs(t *testing.T) {
 	}
 	defer closeLog()
 	Protect("opaque-token", "opaque-header")
-	Log("test", "url", "https://user:password@example.com/play?signature=signed-value&api_key=opaque-token#fragment", "message", "HTTP failure opaque-token opaque-header\nAuthorization: Bearer another-secret")
+	Log("test", "url", "https://user:password@example.com/play?signature=signed-value&api_key=opaque-token#fragment", "message", "HTTP failure opaque-token opaque-header\nAuthorization: Bearer another-secret", "error", fmt.Errorf("request failed: opaque-token https://example.com/report?api_key=opaque-token"))
 	b, err := os.ReadFile(Path())
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +32,9 @@ func TestPrivateRedactedLogs(t *testing.T) {
 	}
 	if !strings.Contains(record["url"].(string), "example.com/play?") {
 		t.Fatal("lost useful route")
+	}
+	if message, ok := record["error"].(string); !ok || !strings.Contains(message, "request failed:") {
+		t.Fatalf("error text missing: %v", record["error"])
 	}
 	stat, _ := os.Stat(Path())
 	if stat.Mode().Perm() != 0600 {

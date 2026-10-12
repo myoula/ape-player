@@ -90,8 +90,11 @@ func Log(event string, fields ...any) {
 	record := map[string]any{"time": time.Now().Format(time.RFC3339Nano), "event": event}
 	for i := 0; i+1 < len(fields); i += 2 {
 		v := fields[i+1]
-		if s, ok := v.(string); ok {
-			v = clean(s)
+		switch value := v.(type) {
+		case string:
+			v = clean(value)
+		case error:
+			v = clean(value.Error())
 		}
 		record[fmt.Sprint(fields[i])] = v
 	}

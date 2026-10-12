@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ape Player
+Name[zh_CN]=Ape Player
+Comment=Native Emby media player
+Exec=ape-player
+Icon=ape-player
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupWMClass=ape-player

@@ -819,7 +819,7 @@ func (p *Painter) scrollbars(e *node) {
 		}
 	}
 	dragging := rt.scrollDrag.st == st
-	if !hovered && !dragging {
+	if !hovered && !dragging && !e.persistentScrollbars {
 		return
 	}
 	color := theme.Scrollbar
@@ -836,6 +836,9 @@ func (p *Painter) scrollbars(e *node) {
 	g := scrollBars(Rect{e.x, e.y, e.w, e.h}, e.barInset, float32(w), float32(h), float32(x), float32(y), e.flags, theme.scrollbarWidth())
 	if g.vertical {
 		bar := g.v
+		if e.persistentScrollbars {
+			p.Fill(Rect{bar.X, g.vTrack.Y + 2, bar.W, max(0, g.vTrack.H-4)}, color.Alpha(.25), bar.W/2)
+		}
 		if dragging && !rt.scrollDrag.horizontal {
 			bar.X, bar.W = bar.X-2, bar.W+2
 		}
@@ -843,6 +846,9 @@ func (p *Painter) scrollbars(e *node) {
 	}
 	if g.horizontal {
 		bar := g.h
+		if e.persistentScrollbars {
+			p.Fill(Rect{g.hTrack.X + 2, bar.Y, max(0, g.hTrack.W-4), bar.H}, color.Alpha(.25), bar.H/2)
+		}
 		if dragging && rt.scrollDrag.horizontal {
 			bar.Y, bar.H = bar.Y-2, bar.H+2
 		}

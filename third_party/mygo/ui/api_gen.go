@@ -4056,6 +4056,18 @@ func (_handle Element) Password() Element {
 	return wrapElement(_node.Password())
 }
 
+// PersistentScrollbars shows scrollbars and their tracks whenever content
+// overflows, even when the pointer is outside the scroll container.
+func (_handle Element) PersistentScrollbars() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.PersistentScrollbars())
+}
+
 // Perspective sees the element's transform in 3D from distance DIPs in
 // front of its origin (Perspective).
 func (_handle Element) Perspective(distance float32) Element {

@@ -344,6 +344,8 @@ type node struct {
 	// barInset moves a scroll container's scroll bars in from its edges
 	// (ScrollbarInsets): top, right, bottom, left.
 	barInset [4]float32
+	// persistentScrollbars keeps overflowing scrollbars visible without hover.
+	persistentScrollbars bool
 	// scrollBase is the offset of a List's content that its rows were
 	// placed at: placing moves them by how far the offset moved since.
 	scrollBase float64
@@ -614,6 +616,10 @@ func (e *node) MarginY(v float32) *node { e.margin[0], e.margin[2] = v, v; retur
 //
 //	ui.Scroll(c).Fill().Padding(64, 16, 16).ScrollbarInsets(64, 0, 0)
 func (e *node) ScrollbarInsets(v ...float32) *node { e.barInset = edges(v); return e }
+
+// PersistentScrollbars shows scrollbars and their tracks whenever content
+// overflows, even when the pointer is outside the scroll container.
+func (e *node) PersistentScrollbars() *node { e.persistentScrollbars = true; return e }
 
 // Width sets the width in DIPs.
 func (e *node) Width(v float32) *node { e.width = px(v); return e }

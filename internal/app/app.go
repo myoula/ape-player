@@ -32,6 +32,7 @@ type App struct {
 	cancel                                               context.CancelFunc
 	generation, request                                  uint64
 	page, title                                          string
+	history                                              []navigationState
 	busy                                                 bool
 	message                                              string
 	sourceEditorOpen                                     bool
@@ -46,10 +47,16 @@ type App struct {
 	items, libraries, seasons, episodes                  []emby.Item
 	detail                                               emby.Item
 	query, sort, kind, watched, library, season, version string
+	detailAudio, detailSub                               string
 	total, offset                                        int
 	grid                                                 ui.GridState
+	episodeGrid                                          ui.GridState
+	episodeScroll                                        ui.ScrollState
+	episodePickerOpen                                    bool
 	images                                               map[string]*ui.Bitmap
 	imagePending                                         map[string]bool
+	imageLastUsed                                        map[string]uint64
+	imageFrame                                           uint64
 	player                                               *player.Player
 	bitmap                                               *ui.Bitmap
 	playback                                             emby.Playback
@@ -80,6 +87,7 @@ func New() (*App, error) {
 	}
 	a := &App{cfg: c, configPath: config.Path(), page: "sources", sort: "最近添加", kind: "全部类型", watched: "全部状态", speed: "1.0", aspectRatio: "原始比例", images: map[string]*ui.Bitmap{}, imagePending: map[string]bool{}, remember: true}
 	a.theme = ui.DarkTheme()
+	a.imageLastUsed = map[string]uint64{}
 	a.theme.Background = ui.Hex("#101217")
 	a.theme.Surface = ui.Hex("#1b1e27")
 	a.theme.Accent = ui.Hex("#c8ef80")
@@ -174,6 +182,9 @@ func (a *App) failure(e error) {
 
 }
 func (a *App) resetSource() {
+	a.history = nil
+	a.episodePickerOpen = false
+	a.episodeScroll = ui.ScrollState{}
 	a.stopPlayback()
 	a.cancel()
 	a.ctx, a.cancel = context.WithCancel(context.Background())
@@ -190,6 +201,8 @@ func (a *App) resetSource() {
 	a.episodes = nil
 	a.images = map[string]*ui.Bitmap{}
 	a.imagePending = map[string]bool{}
+	a.imageLastUsed = map[string]uint64{}
+	a.imageFrame = 0
 	a.message = ""
 	a.busy = false
 	a.library = ""
@@ -197,6 +210,7 @@ func (a *App) resetSource() {
 	a.offset = 0
 	a.kind, a.watched, a.sort = "全部类型", "全部状态", "最近添加"
 	a.version = ""
+	a.resetDetailTracks()
 	a.password = ""
 	a.detail = emby.Item{}
 	a.playback = emby.Playback{}
@@ -302,11 +316,22 @@ func (a *App) logout() {
 	a.activate(a.cfg.Active)
 }
 func (a *App) navigate(page string) {
+	a.navigateTo(page, nil)
+}
+
+func (a *App) navigateTo(page string, configure func()) {
+	a.episodePickerOpen = false
 	if page == "sources" {
 		a.resetSource()
 		a.closeSourceEditor()
 		a.page = "sources"
 		return
+	}
+	if a.page != page || configure != nil {
+		a.rememberPage()
+	}
+	if configure != nil {
+		configure()
 	}
 	a.stopPlayback()
 	a.message = ""
@@ -329,7 +354,7 @@ func (a *App) loadItems() {
 	a.request++
 	req, gen := a.request, a.generation
 	c, ctx := a.client, a.ctx
-	q := map[string][]string{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Series"}, "StartIndex": {strconv.Itoa(a.offset)}, "Limit": {"60"}, "Fields": {"Overview,MediaSources"}, "SortOrder": {"Descending"}, "SortBy": {"DateCreated"}}
+	q := map[string][]string{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Series"}, "StartIndex": {strconv.Itoa(a.offset)}, "Limit": {"60"}, "Fields": {"Overview,MediaSources," + emby.YearFields}, "SortOrder": {"Descending"}, "SortBy": {"DateCreated"}}
 	if a.page == "favorites" {
 		q["Filters"] = []string{"IsFavorite"}
 		q["IncludeItemTypes"] = []string{"Movie,Series,Episode"}
@@ -376,13 +401,20 @@ func (a *App) openDetail(item emby.Item) {
 	if a.client == nil {
 		return
 	}
+	if a.page != "detail" || a.detail.ID != item.ID {
+		a.rememberPage()
+	}
 	a.stopPlayback()
 	a.page = "detail"
 	a.detail = item
 	a.seasons = nil
 	a.episodes = nil
 	a.version = ""
+	a.resetDetailTracks()
 	a.season = ""
+	a.episodePickerOpen = false
+	a.episodeGrid = ui.GridState{}
+	a.episodeScroll = ui.ScrollState{}
 	a.busy = true
 	a.message = ""
 	a.request++
@@ -391,11 +423,9 @@ func (a *App) openDetail(item emby.Item) {
 	go func() {
 		d, e := c.Item(ctx, item.ID)
 		var seasons, episodes emby.Items
-		if e == nil && d.Type == "Series" {
-			seasons, e = c.List(ctx, "Shows/"+d.ID+"/Seasons", map[string][]string{"UserId": {c.UserID}})
-			if e == nil && len(seasons.Items) > 0 {
-				episodes, e = c.List(ctx, "Shows/"+d.ID+"/Episodes", map[string][]string{"UserId": {c.UserID}, "SeasonId": {seasons.Items[0].ID}, "Fields": {"MediaSources"}})
-			}
+		seasonID := ""
+		if e == nil {
+			seasons, episodes, seasonID, e = fetchDetailEpisodes(ctx, c, d)
 		}
 		a.update(func() {
 			if gen != a.generation || req != a.request {
@@ -409,9 +439,7 @@ func (a *App) openDetail(item emby.Item) {
 			a.detail = d
 			a.seasons = seasons.Items
 			a.episodes = episodes.Items
-			if len(a.seasons) > 0 {
-				a.season = a.seasons[0].ID
-			}
+			a.season = seasonID
 			if len(d.MediaSources) > 0 {
 				a.version = d.MediaSources[0].ID
 			}
@@ -419,14 +447,21 @@ func (a *App) openDetail(item emby.Item) {
 	}()
 }
 func (a *App) loadSeason(id string) {
+	if a.client == nil {
+		return
+	}
 	a.season = id
+	a.episodes = nil
+	a.episodeGrid = ui.GridState{}
+	a.episodeScroll = ui.ScrollState{}
+	a.message = ""
 	a.busy = true
 	a.request++
 	req, gen := a.request, a.generation
 	c, ctx := a.client, a.ctx
-	series := a.detail.ID
+	series := detailSeries(a.detail)
 	go func() {
-		r, e := c.List(ctx, "Shows/"+series+"/Episodes", map[string][]string{"UserId": {c.UserID}, "SeasonId": {id}, "Fields": {"MediaSources"}})
+		r, e := fetchEpisodes(ctx, c, series, id)
 		a.update(func() {
 			if gen != a.generation || req != a.request {
 				return

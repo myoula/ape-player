@@ -525,6 +525,51 @@ func TestScrollbarInsets(t *testing.T) {
 	}
 }
 
+func TestPersistentScrollbars(t *testing.T) {
+	persistent, overflow := true, true
+	var scroll ScrollState
+	theme := DarkTheme()
+	theme.Scrollbar = RGB(255, 0, 0)
+	tt := coreNewTester(func(c *context) {
+		c.SetTheme(theme)
+		sc := coreScrollHorizontal(c).Size(200, 100).Background(RGB(0, 0, 0)).TrackScroll(&scroll)
+		if persistent {
+			sc.PersistentScrollbars()
+		}
+		sc.Children(func() {
+			width := float32(1000)
+			if !overflow {
+				width = 100
+			}
+			coreBox(c).Size(width, 70).Shrink(0)
+		})
+	}, 300, 180)
+	tt.Move(250, 150)
+	if tt.Image().RGBAAt(12, 94).R < 200 || tt.Image().RGBAAt(150, 94).R == 0 {
+		t.Fatal("thumb and track must paint without hover")
+	}
+	tt.Press(12, 94)
+	tt.Move(195, 94)
+	tt.Release(195, 94)
+	if scroll.X != scroll.MaxX || scroll.X == 0 {
+		t.Fatal("persistent scrollbar cannot be dragged to the end")
+	}
+	tt.Move(250, 150)
+	if tt.Image().RGBAAt(185, 94).R < 200 {
+		t.Fatal("thumb disappeared after pointer left")
+	}
+	persistent = false
+	tt.Frame()
+	if tt.Image().RGBAAt(185, 94).R != 0 {
+		t.Fatal("default scrollbars should still hide without hover")
+	}
+	persistent, overflow = true, false
+	tt.Frame()
+	if tt.Image().RGBAAt(12, 94).R != 0 {
+		t.Fatal("scrollbar painted without overflowing content")
+	}
+}
+
 func TestScrollContentShrinks(t *testing.T) {
 	long := true
 	var top *node

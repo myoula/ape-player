@@ -49,6 +49,9 @@ type Item struct {
 	Type              string
 	Overview          string
 	ProductionYear    int
+	PremiereDate      time.Time
+	EndDate           time.Time
+	Status            string
 	CommunityRating   float64
 	RunTimeTicks      int64
 	SeriesName        string
@@ -91,3 +94,6 @@ type Playback struct {
 }
 
 const TicksPerSecond = 10000000
+
+// YearFields requests the metadata used by movie and series year labels.
+const YearFields = "ProductionYear,PremiereDate,EndDate,Status"

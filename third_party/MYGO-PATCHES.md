@@ -14,3 +14,9 @@
 - CPU、Metal、D3D11 使用黑色位图占位；应用首版只启用 Linux GPU 播放，并在 GPU 未初始化时提示错误。不进行逐帧 CPU 回读。
 
 新增 `internal/gpu/gl/external_test.go` 验证画面合成、上层原生 UI、尺寸变化及释放时机。修改的其他文件为 `ui/bitmap.go`、`internal/scene/scene.go`、`internal/gpu/gl/gl.go`、`internal/linux/surface.go`。
+
+## 常驻滚动条
+
+新增 `ui.Element.PersistentScrollbars()`，内容溢出时始终绘制滑块与淡色轨道，保留原有拖动和点击轨道翻页行为。未启用的容器仍仅在悬停或拖动时显示。分集横排启用该选项，并在简介下方预留滚动条空间。
+
+修改 `ui/element.go`、`ui/paint.go`，通过 `go generate ./ui` 更新 `ui/api_gen.go`。`TestPersistentScrollbars` 验证非悬停绘制、拖动、默认隐藏行为与内容不溢出时不显示；应用测试验证拖至第 1000 集及鼠标离开后保持可见。

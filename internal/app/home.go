@@ -47,12 +47,12 @@ func fetchHome(ctx context.Context, c *emby.Client, after <-chan struct{}) (home
 		{section{Title: "继续观看"}, func() ([]emby.Item, error) {
 			r, e := c.List(ctx, "Users/"+c.UserID+"/Items/Resume", map[string][]string{
 				"Limit": {"12"}, "MediaTypes": {"Video"}, "EnableUserData": {"true"},
-				"Fields": {"UserDataLastPlayedDate"}, "SortBy": {"DatePlayed"}, "SortOrder": {"Descending"},
+				"Fields": {"UserDataLastPlayedDate," + emby.YearFields}, "SortBy": {"DatePlayed"}, "SortOrder": {"Descending"},
 			})
 			return r.Items, e
 		}},
 		{section{Title: "最近添加"}, func() ([]emby.Item, error) {
-			r, e := c.List(ctx, "Users/"+c.UserID+"/Items", map[string][]string{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode"}, "SortBy": {"DateCreated"}, "SortOrder": {"Descending"}, "Limit": {"18"}, "Fields": {"Overview"}})
+			r, e := c.List(ctx, "Users/"+c.UserID+"/Items", map[string][]string{"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode"}, "SortBy": {"DateCreated"}, "SortOrder": {"Descending"}, "Limit": {"18"}, "Fields": {"Overview," + emby.YearFields}})
 			return r.Items, e
 		}},
 	}
@@ -73,6 +73,7 @@ func fetchHome(ctx context.Context, c *emby.Client, after <-chan struct{}) (home
 				r, err := c.List(ctx, "Users/"+c.UserID+"/Items", map[string][]string{
 					"ParentId": {library.ID}, "Recursive": {"true"}, "IncludeItemTypes": {types},
 					"SortBy": {"DateCreated"}, "SortOrder": {"Descending"}, "Limit": {"18"}, "EnableUserData": {"true"},
+					"Fields": {emby.YearFields},
 				})
 				return r.Items, err
 			},
@@ -182,13 +183,14 @@ func (a *App) loadHome() {
 	}()
 }
 func (a *App) openCategory(library, kind string) {
-	a.library = library
-	a.kind = kind
-	a.query = ""
-	a.watched = "全部状态"
-	a.sort = "最近添加"
-	a.offset = 0
-	a.navigate("library")
+	a.navigateTo("library", func() {
+		a.library = library
+		a.kind = kind
+		a.query = ""
+		a.watched = "全部状态"
+		a.sort = "最近添加"
+		a.offset = 0
+	})
 }
 func libraryKind(item emby.Item) string {
 	switch item.CollectionType {

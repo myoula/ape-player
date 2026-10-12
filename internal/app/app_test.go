@@ -5,6 +5,7 @@ import (
 	"ape-player/internal/emby"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/egoist/mygo/ui"
 	"image/png"
 	"net/http"
@@ -23,6 +24,49 @@ func testApp(t *testing.T) *App {
 		t.Fatal(e)
 	}
 	return a
+}
+
+func TestSidebarScrollKeepsBottomActionsReachable(t *testing.T) {
+	a := testApp(t)
+	a.page = "settings"
+	a.cfg.Active = "server"
+	a.cfg.Sources = []config.Source{{ID: "server", Name: "测试服务器", Username: "viewer"}}
+	a.client, _ = emby.New("http://example.test", "token", "u", "d", 5)
+	for i := range 30 {
+		a.libraries = append(a.libraries, emby.Item{ID: fmt.Sprint(i), Name: fmt.Sprintf("分类 %02d", i+1)})
+	}
+	tt := ui.NewTester(a.view, 940, 640)
+	main, found := tt.Find("播放偏好")
+	if !found {
+		t.Fatal("main view missing")
+	}
+	before, found := tt.Find("返回来源管理")
+	if !found || before.Y < 640 {
+		t.Fatal("fixture should overflow the sidebar")
+	}
+	tt.Scroll(100, 400, 0, 10000)
+	for _, label := range []string{"分类 30", "返回来源管理"} {
+		r, found := tt.Find(label)
+		if !found || r.Y < 0 || r.Y+r.H > 640 || r.X+r.W > 208 {
+			t.Fatalf("sidebar control is not reachable after scrolling: %s %+v", label, r)
+		}
+	}
+	after, _ := tt.Find("播放偏好")
+	if after != main {
+		t.Fatal("sidebar scrolling moved the main content")
+	}
+	tt.Scroll(100, 400, 0, -10000)
+	top, found := tt.Find("首页")
+	if !found || top.Y < 0 || top.Y+top.H > 640 {
+		t.Fatal("cannot scroll back to top navigation")
+	}
+	tt.Scroll(100, 400, 0, 10000)
+	if err := tt.Click("返回来源管理"); err != nil {
+		t.Fatal(err)
+	}
+	if a.page != "sources" {
+		t.Fatal("scrolled sidebar action did not navigate")
+	}
 }
 func TestSourcesAndLoginViews(t *testing.T) {
 	a := testApp(t)

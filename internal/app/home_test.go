@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,6 +159,11 @@ func TestHomeLibraryShelves(t *testing.T) {
 			return
 		}
 		q := r.URL.Query()
+		for _, field := range []string{"ProductionYear", "PremiereDate", "EndDate", "Status"} {
+			if !slices.Contains(strings.Split(q.Get("Fields"), ","), field) {
+				t.Errorf("category request missing %s", field)
+			}
+		}
 		want := "Series"
 		if parent == "movies" {
 			want = "Movie"
@@ -171,7 +178,7 @@ func TestHomeLibraryShelves(t *testing.T) {
 			w.WriteHeader(500)
 			return
 		}
-		json.NewEncoder(w).Encode(emby.Items{Items: []emby.Item{{ID: parent + "-item", Name: parent + " 的影片", Type: "Series"}}})
+		json.NewEncoder(w).Encode(emby.Items{Items: []emby.Item{{ID: parent + "-item", Name: parent + " 的影片", Type: "Series", ProductionYear: 2026, Status: "Continuing"}}})
 	}))
 	defer srv.Close()
 	client, _ := emby.New(srv.URL, "token", "u", "d", 5)
@@ -211,6 +218,9 @@ func TestHomeLibraryShelves(t *testing.T) {
 	if !tt.HasText("cn 的影片") || !tt.HasText("mixed 的影片") || !tt.HasText("加载失败") {
 		t.Fatal("category content or partial error missing")
 	}
+	if _, zero := tt.Find("0"); !tt.HasText("2026–现在") || zero {
+		t.Fatal("category year or continuing status missing")
+	}
 }
 
 func TestHomeCategoryUnauthorized(t *testing.T) {
@@ -237,7 +247,7 @@ func TestHomeIncludesRecentPlayMissingFromResume(t *testing.T) {
 		switch {
 		case r.URL.Path == "/Users/u/Items/Resume":
 			q := r.URL.Query()
-			if q.Get("Fields") != "UserDataLastPlayedDate" || q.Get("EnableUserData") != "true" || q.Get("SortBy") != "DatePlayed" {
+			if !slices.Contains(strings.Split(q.Get("Fields"), ","), "UserDataLastPlayedDate") || q.Get("EnableUserData") != "true" || q.Get("SortBy") != "DatePlayed" {
 				t.Errorf("resume metadata not requested: %v", q)
 			}
 			w.Write([]byte(`{"Items":[

@@ -121,24 +121,30 @@ func (a *App) stopPlayback() {
 	}
 }
 func (a *App) play(item emby.Item) {
+	a.playAt(item, -1)
+}
+
+// A negative start resumes the saved position; zero explicitly restarts playback.
+func (a *App) playAt(item emby.Item, start float64) {
 	if item.Type == "Series" {
 		if len(a.episodes) > 0 {
 			for _, ep := range a.episodes {
 				if !ep.UserData.Played && ep.UserData.PlaybackPositionTicks > 0 {
-					a.play(ep)
+					a.playAt(ep, start)
 					return
 				}
 			}
 			for _, ep := range a.episodes {
 				if !ep.UserData.Played {
-					a.play(ep)
+					a.playAt(ep, start)
 					return
 				}
 			}
-			a.play(a.episodes[0])
+			a.playAt(a.episodes[0], start)
 		}
 		return
 	}
+	audio, sub := a.detailTrackIndices(item)
 	if item.Type != "Episode" {
 		a.queueIndex = -1
 		for i, v := range a.queue {
@@ -151,7 +157,7 @@ func (a *App) play(item emby.Item) {
 			a.queue = append(a.queue, item)
 			a.queueIndex = len(a.queue) - 1
 		}
-		a.prepare(item, false, -1, nil, nil)
+		a.prepare(item, false, start, audio, sub)
 		return
 	}
 	// Fetch the complete series, rather than limiting next/previous to the visible season.
@@ -188,11 +194,12 @@ func (a *App) play(item emby.Item) {
 			if len(a.queue) == 0 {
 				a.queue = []emby.Item{item}
 			}
-			a.prepare(item, false, -1, nil, nil)
+			a.prepare(item, false, start, audio, sub)
 		})
 	}()
 }
 func (a *App) prepare(item emby.Item, transcode bool, start float64, audio, sub *int) {
+	a.rememberPage()
 	a.stopPlayback()
 	a.page = "player"
 	a.busy = true

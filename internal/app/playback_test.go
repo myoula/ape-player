@@ -4,6 +4,7 @@ import (
 	"ape-player/internal/emby"
 	"ape-player/internal/player"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -144,5 +145,104 @@ func TestReportWarningRecoversWithoutClearingPlaybackError(t *testing.T) {
 	a.reportResult(p, a.playbackSerial-1, errors.New("late failure"))
 	if a.reportMessage != "" {
 		t.Fatal("old playback result leaked into a new session")
+	}
+}
+
+func TestDetailRestartAndResume(t *testing.T) {
+	for _, kind := range []string{"Movie", "Episode"} {
+		for _, action := range []string{"播放", "从头播放", "继续观看"} {
+			t.Run(kind+action, func(t *testing.T) {
+				a := testApp(t)
+				a.page = "detail"
+				a.detail = emby.Item{ID: "item", Name: "测试影片", Type: kind, SeriesID: "series", IndexNumber: 2,
+					UserData: emby.UserData{PlaybackPositionTicks: 120 * emby.TicksPerSecond}}
+				a.version = "selected-version"
+				if action == "播放" {
+					a.detail.UserData.PlaybackPositionTicks = 0
+				}
+				savedPosition := a.detail.UserData.PlaybackPositionTicks
+				a.detail.MediaSources = []emby.MediaSource{{ID: a.version, Name: "1080p", MediaStreams: []emby.Stream{
+					{Index: 2, Type: "Audio", DisplayTitle: "国语"},
+					{Index: 4, Type: "Subtitle", DisplayTitle: "简体中文", IsExternal: true},
+				}}}
+				requests := make(chan struct {
+					StartTimeTicks                        int64
+					MediaSourceID                         string
+					AudioStreamIndex, SubtitleStreamIndex *int
+				}, 1)
+				release := make(chan struct{})
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/Shows/series/Episodes" {
+						json.NewEncoder(w).Encode(emby.Items{Items: []emby.Item{{ID: "first", IndexNumber: 1}, a.detail, {ID: "third", IndexNumber: 3}}})
+						return
+					}
+					if r.URL.Path != "/Items/item/PlaybackInfo" {
+						t.Errorf("unexpected request: %s", r.URL.Path)
+					}
+					var body struct {
+						StartTimeTicks                        int64
+						MediaSourceID                         string
+						AudioStreamIndex, SubtitleStreamIndex *int
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					requests <- body
+					<-release
+				}))
+				defer srv.Close()
+				defer close(release)
+				defer a.cancel()
+				a.client, _ = emby.New(srv.URL, "token", "u", "d", 5)
+				a.imagePending["item:"] = true
+				tt := ui.NewTester(a.view, 1280, 900)
+				choose := func(control, value string) {
+					t.Helper()
+					if err := tt.Click(control); err != nil {
+						t.Fatal(err)
+					}
+					if err := tt.Click(value); err != nil {
+						t.Fatal(err)
+					}
+				}
+				choose("详情音轨", "2 · 国语")
+				wantSub := 4
+				if action == "从头播放" {
+					choose("详情字幕", "关闭字幕")
+					wantSub = -1
+				} else {
+					choose("详情字幕", "4 · 简体中文 · 外挂")
+				}
+				restart, restartOK := tt.Find("从头播放")
+				resume, resumeOK := tt.Find("继续观看")
+				if action != "播放" && (!restartOK || !resumeOK || restart.X >= resume.X) {
+					t.Fatal("restart should precede resume")
+				}
+				if err := tt.Click(action); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case body := <-requests:
+					want := int64(0)
+					if action == "继续观看" {
+						want = 120 * emby.TicksPerSecond
+					}
+					if body.StartTimeTicks != want || body.MediaSourceID != "selected-version" {
+						t.Fatalf("wrong start or version: %+v", body)
+					}
+					if body.AudioStreamIndex == nil || *body.AudioStreamIndex != 2 || body.SubtitleStreamIndex == nil || *body.SubtitleStreamIndex != wantSub {
+						t.Fatalf("detail track selections were not used: %+v", body)
+					}
+					if kind == "Episode" && (len(a.queue) != 3 || a.queueIndex != 1) {
+						t.Fatal("restart lost episode navigation")
+					}
+					if a.detail.UserData.PlaybackPositionTicks != savedPosition {
+						t.Fatal("button modified saved progress before playback")
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("playback request missing")
+				}
+			})
+		}
 	}
 }

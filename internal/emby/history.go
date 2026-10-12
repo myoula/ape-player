@@ -14,7 +14,7 @@ func (c *Client) RecentlyPlayed(ctx context.Context, limit int) ([]Item, error) 
 		limit = 18
 	}
 	result, e := c.List(ctx, "Users/"+c.UserID+"/Items", url.Values{
-		"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode"}, "SortBy": {"DatePlayed"}, "SortOrder": {"Descending"}, "Limit": {strconv.Itoa(limit)}, "EnableUserData": {"true"}, "Fields": {"Overview,UserDataLastPlayedDate"},
+		"Recursive": {"true"}, "IncludeItemTypes": {"Movie,Episode"}, "SortBy": {"DatePlayed"}, "SortOrder": {"Descending"}, "Limit": {strconv.Itoa(limit)}, "EnableUserData": {"true"}, "Fields": {"Overview,UserDataLastPlayedDate," + YearFields},
 	})
 	if e != nil {
 		return nil, e

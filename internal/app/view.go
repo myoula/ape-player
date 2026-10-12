@@ -11,6 +11,8 @@ import (
 )
 
 func (a *App) view(c *ui.Context) {
+	a.imageFrame++
+	defer a.trimPosterCache()
 	c.SetTheme(a.theme)
 	if a.page != "queue" && (a.page != "player" || !a.queueOpen) {
 		a.queueRevealID = ""
@@ -53,7 +55,7 @@ func (a *App) view(c *ui.Context) {
 	})
 }
 func (a *App) sidebar(c *ui.Context) {
-	ui.Column(c).Width(208).FillHeight().Padding(20, 16).Gap(8).Background(ui.Hex("#161920")).Children(func() {
+	ui.Scroll(c).Width(208).Shrink(0).FillHeight().Padding(20, 16).Gap(8).Background(ui.Hex("#161920")).Label("侧边导航").Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Margin(12, 8, 26).Children(func() {
 			ui.Box(c).Size(32, 32).Radius(9).Background(c.Theme().Accent).Center().Children(func() { glyph(c, "play").TextColor(c.Theme().AccentText) })
 			ui.Column(c).Gap(1).Children(func() {
@@ -63,7 +65,7 @@ func (a *App) sidebar(c *ui.Context) {
 		})
 		if a.client != nil {
 			for _, n := range []struct{ id, label, icon string }{{"home", "首页", "house"}, {"library", "媒体库", "library-big"}, {"favorites", "我的收藏", "heart"}, {"queue", "播放列表", "list-video"}} {
-				navButton(c, n.icon, n.label, a.page == n.id).Disabled(!a.canBrowse()).OnClick(func() { a.library = ""; a.navigate(n.id) })
+				navButton(c, n.icon, n.label, a.page == n.id).Disabled(!a.canBrowse()).OnClick(func() { a.navigateTo(n.id, func() { a.library = "" }) })
 			}
 			if len(a.libraries) > 0 {
 				ui.Text(c, "媒体库").FontSize(11).TextColor(c.Theme().TextMuted).Margin(24, 10, 8)
@@ -73,14 +75,16 @@ func (a *App) sidebar(c *ui.Context) {
 			}
 		}
 		ui.Spacer(c)
-		navButton(c, "server", "来源管理", a.page == "sources").OnClick(func() { a.navigate("sources") })
-		navButton(c, "settings-2", "偏好设置", a.page == "settings").OnClick(func() { a.navigate("settings") })
+		if a.client == nil {
+			navButton(c, "server", "来源管理", a.page == "sources").OnClick(func() { a.navigate("sources") })
+			navButton(c, "settings-2", "偏好设置", a.page == "settings").OnClick(func() { a.navigate("settings") })
+		}
 		ui.Divider(c).Margin(12, 0)
 		if s := a.active(); s != nil && a.client != nil {
 			ui.Text(c, s.Name).Bold().Margin(0, 8)
 			ui.Text(c, s.Username).FontSize(12).TextColor(c.Theme().TextMuted).Margin(0, 8)
 			if a.canBrowse() {
-				actionButton(c, "log-out", "退出登录").OnClick(a.logout)
+				actionButton(c, "log-out", "返回来源管理").OnClick(func() { a.navigate("sources") })
 			}
 		} else {
 			ui.Text(c, "尚未连接服务器").FontSize(12).TextColor(c.Theme().TextMuted)
@@ -90,8 +94,8 @@ func (a *App) sidebar(c *ui.Context) {
 func (a *App) header(c *ui.Context) {
 	names := map[string]string{"sources": "来源管理", "login": "连接你的媒体世界", "home": "首页", "library": "媒体库", "favorites": "我的收藏", "detail": "影片详情", "settings": "偏好设置", "queue": "播放列表"}
 	ui.Row(c).Padding(22, 28).Gap(16).Children(func() {
-		if a.client != nil && a.page != "sources" {
-			iconButton(c, "arrow-left", "返回来源管理").OnClick(func() { a.navigate("sources") })
+		if a.page != "sources" && (len(a.history) > 0 || a.page != "home") {
+			iconButton(c, "arrow-left", "返回上一页").OnClick(a.goBack)
 		}
 		name := names[a.page]
 		if a.page == "home" {
@@ -221,6 +225,26 @@ func watchProgress(item emby.Item) float64 {
 	return min(1, max(0, progress))
 }
 
+func yearLabel(item emby.Item) string {
+	year := item.ProductionYear
+	if year <= 0 && !item.PremiereDate.IsZero() {
+		year = item.PremiereDate.Year()
+	}
+	if year <= 0 {
+		return ""
+	}
+	label := strconv.Itoa(year)
+	if item.Type == "Series" {
+		switch {
+		case strings.EqualFold(item.Status, "Continuing"):
+			return label + "–现在"
+		case strings.EqualFold(item.Status, "Ended") && !item.EndDate.IsZero() && item.EndDate.Year() > year:
+			return label + "–" + strconv.Itoa(item.EndDate.Year())
+		}
+	}
+	return label
+}
+
 func (a *App) mediaCard(c *ui.Context, item emby.Item, showProgress bool) {
 	ui.Column(c.Key(item.ID)).Width(156).Gap(7).Children(func() {
 		poster := ui.Box(c).Radius(8).Clip().Label("查看详情：" + title(item)).OnClick(func() { a.openDetail(item) })
@@ -236,7 +260,7 @@ func (a *App) mediaCard(c *ui.Context, item emby.Item, showProgress bool) {
 			}
 		})
 		name := item.Name
-		meta := fmt.Sprint(item.ProductionYear)
+		meta := yearLabel(item)
 		if item.Type == "Episode" {
 			if strings.TrimSpace(item.SeriesName) != "" {
 				name = item.SeriesName
@@ -279,13 +303,14 @@ func (a *App) libraryView(c *ui.Context) {
 func (a *App) detailView(c *ui.Context) {
 	d := a.detail
 	ui.Scroll(c).Grow(1).Padding(0, 28, 28).Gap(20).Children(func() {
-		actionButton(c, "arrow-left", "返回媒体库").OnClick(func() { a.navigate("library") })
 		ui.Row(c).AlignItems(ui.Start).Gap(30).Children(func() {
 			a.poster(c, d, 220, 330)
 			ui.Column(c).Grow(1).Gap(14).Children(func() {
 				ui.Text(c, title(d)).FontSize(30).Bold()
 				ui.Row(c).Gap(10).AlignItems(ui.Center).TextColor(c.Theme().TextMuted).Children(func() {
-					ui.Text(c, fmt.Sprint(d.ProductionYear))
+					if year := yearLabel(d); year != "" {
+						ui.Text(c, year)
+					}
 					glyph(c, "star").Size(15, 15)
 					ui.Text(c, fmt.Sprintf("%.1f", d.CommunityRating))
 					ui.Text(c, duration(float64(d.RunTimeTicks)/emby.TicksPerSecond))
@@ -297,6 +322,7 @@ func (a *App) detailView(c *ui.Context) {
 					text := "播放"
 					if d.UserData.PlaybackPositionTicks > 0 {
 						text = "继续观看"
+						actionButton(c, "rotate-ccw", "从头播放").Disabled(a.busy).OnClick(func() { a.playAt(d, 0) })
 					}
 					primaryAction(c, "play", text).Disabled(a.busy).OnClick(func() { a.play(d) })
 					fav := "收藏"
@@ -313,48 +339,23 @@ func (a *App) detailView(c *ui.Context) {
 						actionButton(c, "list-plus", "加入播放列表").OnClick(func() { a.queue = append(a.queue, d); a.message = "已加入播放列表" })
 					}
 				})
-				if len(d.MediaSources) > 1 {
-					label(c, "媒体版本")
-					selection(c, &a.version, mediaOptions(d.MediaSources), nil)
-				}
-				for _, s := range d.MediaSources {
-					if s.ID != a.version && len(d.MediaSources) > 1 {
-						continue
-					}
-					ui.Text(c, s.Name).FontSize(12).TextColor(c.Theme().Accent)
-					for _, t := range s.MediaStreams {
-						ui.Text(c, t.Type+" · "+t.DisplayTitle).FontSize(12).TextColor(c.Theme().TextMuted)
-					}
+				if d.Type != "Series" {
+					a.detailTrackSelectors(c)
 				}
 			})
 		})
-		if len(a.seasons) > 0 {
-			ui.Row(c).Gap(8).Wrap().Children(func() {
-				for _, s := range a.seasons {
-					ui.Button(c, s.Name).Disabled(s.ID == a.season).OnClick(func() { a.loadSeason(s.ID) })
-				}
-			})
-		}
-		for _, ep := range a.episodes {
-			ui.Row(c.Key(ep.ID)).Padding(14).Radius(9).Background(c.Theme().Surface).Gap(12).Children(func() {
-				ui.Text(c, fmt.Sprintf("%02d", ep.IndexNumber)).TextColor(c.Theme().Accent)
-				ui.Column(c).Grow(1).Gap(4).Children(func() {
-					ui.Text(c, ep.Name).Bold()
-					ui.Text(c, duration(float64(ep.RunTimeTicks)/emby.TicksPerSecond)).FontSize(12).TextColor(c.Theme().TextMuted)
-				})
-				if ep.UserData.Played {
-					ui.Text(c, "已观看")
-				}
-				actionButton(c, "info", "详情").OnClick(func() { a.openDetail(ep) })
-				primaryAction(c, "play", "播放").OnClick(func() { a.play(ep) })
-			})
+		if detailSeries(d).ID != "" {
+			a.episodeShelf(c)
 		}
 	})
+	if detailSeries(d).ID != "" {
+		a.episodePicker(c)
+	}
 }
 
 type option struct{ id, label string }
 
-func selection(c *ui.Context, value *string, options []option, changed func()) {
+func selection(c *ui.Context, value *string, options []option, changed func()) ui.Element {
 	labels := make([]string, len(options))
 	current := "自动"
 	for i, o := range options {
@@ -363,7 +364,7 @@ func selection(c *ui.Context, value *string, options []option, changed func()) {
 			current = o.label
 		}
 	}
-	ui.Select(c, &current, labels).OnChange(func() {
+	return ui.Select(c, &current, labels).OnChange(func() {
 		for _, o := range options {
 			if o.label == current {
 				*value = o.id
@@ -423,14 +424,7 @@ func (a *App) playerView(c *ui.Context) {
 		}
 		if !a.controlsHidden {
 			ui.Row(c).Absolute().Top(0).Left(0).Right(0).Padding(18, 22).Gap(14).Background(ui.RGBA(15, 18, 23, .92)).Children(func() {
-				iconButton(c, "arrow-left", "返回").OnClick(func() {
-					if a.canBrowse() {
-						a.navigate("home")
-					} else {
-						a.stopPlayback()
-						a.page = "sources"
-					}
-				})
+				iconButton(c, "arrow-left", "返回").OnClick(a.goBack)
 				ui.Text(c, title(a.playback.Item)).Grow(1).Bold().SingleLine()
 				iconButton(c, "info", "详情").OnClick(func() { a.infoOpen = !a.infoOpen })
 				iconButton(c, "list-video", "播放列表").OnClick(func() { a.queueOpen = !a.queueOpen })

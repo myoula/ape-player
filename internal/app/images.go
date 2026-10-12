@@ -13,6 +13,7 @@ import (
 
 func (a *App) poster(c *ui.Context, item emby.Item, w, h float32) {
 	key := item.ID + ":" + item.ImageTags["Primary"]
+	a.imageLastUsed[key] = a.imageFrame
 	if b := a.images[key]; b != nil {
 		ui.Image(c, b).Size(w, h).Fit(ui.Cover).Radius(8)
 		return
@@ -44,18 +45,45 @@ func (a *App) poster(c *ui.Context, item emby.Item, w, h float32) {
 			bitmap, e = ui.DecodeBitmap(b)
 		}
 		a.update(func() {
-			if gen != a.generation {
-				return
-			}
 			if e == nil {
-				if len(a.images) > 160 {
-					a.images = map[string]*ui.Bitmap{}
-					a.imagePending = map[string]bool{}
-				}
-				a.images[key] = bitmap
+				a.cachePoster(gen, key, bitmap)
 			}
 		})
 	}()
+}
+
+const posterCacheLimit = 160
+
+func (a *App) cachePoster(generation uint64, key string, bitmap *ui.Bitmap) {
+	if generation == a.generation {
+		a.images[key] = bitmap
+	}
+}
+
+// Keep every poster used by this view, even if a large home page exceeds the
+// cache target. Evicting those posters would cause a reload on every frame.
+// Trim only after the whole view is built, so later shelves are protected too.
+func (a *App) trimPosterCache() {
+	if len(a.images) <= posterCacheLimit {
+		return
+	}
+	var unused []string
+	for key := range a.images {
+		if a.imageLastUsed[key] != a.imageFrame {
+			unused = append(unused, key)
+		}
+	}
+	sort.Slice(unused, func(i, j int) bool {
+		return a.imageLastUsed[unused[i]] < a.imageLastUsed[unused[j]]
+	})
+	for _, key := range unused {
+		if len(a.images) <= posterCacheLimit {
+			break
+		}
+		delete(a.images, key)
+		delete(a.imageLastUsed, key)
+		delete(a.imagePending, key)
+	}
 }
 
 // Bound the persistent poster cache. Filenames are opaque hashes; no credentials

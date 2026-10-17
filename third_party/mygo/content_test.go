@@ -145,6 +145,38 @@ func TestContentInvalidateAndUpdate(t *testing.T) {
 	}
 }
 
+func TestContentRepaint(t *testing.T) {
+	builds, state, shown := 0, 0, 0
+	w, _, s := contentWindow(t, func(c *ui.Context) {
+		builds++
+		shown = state
+		ui.Textf(c, "%d", state)
+	})
+	before, frames := builds, s.Frames()
+	w.Repaint()
+	w.Repaint()
+	onMain(func() {})
+	onMain(func() { s.Frame() })
+	if builds != before || s.Frames() != frames+1 {
+		t.Fatalf("repaint: builds=%d frames=%d", builds-before, s.Frames()-frames)
+	}
+	for _, first := range []bool{true, false} {
+		if first {
+			w.Repaint()
+		}
+		w.Update(func() { state++ })
+		if !first {
+			w.Repaint()
+		}
+		onMain(func() {})
+		onMain(func() { s.Frame() })
+		if shown != state || builds == before {
+			t.Fatalf("repaint lost Update: shown=%d state=%d", shown, state)
+		}
+		before = builds
+	}
+}
+
 // TestContentTitleBar checks that native UI gets the room the window
 // controls of a hidden title bar take, and a frame when it changes.
 func TestContentTitleBar(t *testing.T) {

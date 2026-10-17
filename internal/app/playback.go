@@ -258,7 +258,7 @@ func (a *App) startLocal(file string) {
 }
 func (a *App) openPlayer() {
 	a.mediaLoading = true
-	p, e := player.New(func() { a.win.Invalidate() })
+	p, e := player.New(func() { a.win.Repaint() })
 	if e != nil {
 		a.mediaLoading = false
 		a.failure(e)
@@ -275,7 +275,7 @@ func (a *App) openPlayer() {
 		if a.player != p {
 			p.Close()
 		}
-	})
+	}).FitGLToDisplay()
 	go func() {
 		for e := range p.Events {
 			a.update(func() {

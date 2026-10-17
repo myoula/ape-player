@@ -326,8 +326,13 @@ var lastImageID atomic.Uint64
 // GLImage renders into a framework-owned FBO on the current GL context.
 // Release runs on that context when the image leaves the scene.
 type GLImage struct {
-	Render  func(context uintptr, fbo uint32, width, height int)
-	Release func()
+	// Target size is independent of the CPU fallback's pixel dimensions.
+	Width, Height int
+	// FitToDisplay caps the target at the pixels needed by the drawn image,
+	// preserving Width:Height and never exceeding the original dimensions.
+	FitToDisplay bool
+	Render       func(context uintptr, fbo uint32, width, height int)
+	Release      func()
 }
 
 type Image struct {

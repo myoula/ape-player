@@ -227,24 +227,32 @@ func orient(img *scene.Image, o int) *scene.Image {
 // the GL context current. Only the Linux GL backend invokes the callbacks;
 // other backends show the black fallback. No GL object may escape its context.
 func NewGLBitmap(w, h int, render func(uintptr, uint32, int, int), release func()) *Bitmap {
-	pix := make([]byte, w*h*4)
-	for i := 3; i < len(pix); i += 4 {
-		pix[i] = 255
-	}
-	s := scene.NewImageRGBA(w, h, pix)
-	s.GL = &scene.GLImage{Render: render, Release: release}
+	// Image sampling uses normalized UVs. A single black pixel is sufficient
+	// for CPU/Metal/D3D fallback, independent of the full-sized GL texture.
+	s := scene.NewImageRGBA(1, 1, []byte{0, 0, 0, 255})
+	s.GL = &scene.GLImage{Width: w, Height: h, Render: render, Release: release}
 	return &Bitmap{img: s, w: w, h: h}
 }
 
-// ResizeGL changes the render target, preserving the producer's context.
+// FitGLToDisplay lets the GL renderer reduce the target to the displayed pixel
+// size, accounting for screen scale and cropping. It preserves the source aspect
+// ratio and never exceeds the dimensions supplied to NewGLBitmap or ResizeGL.
+// The bitmap's layout size and non-GL fallback are unchanged. Call on the UI thread.
+func (b *Bitmap) FitGLToDisplay() *Bitmap {
+	if b.img.GL != nil {
+		b.img.GL.FitToDisplay = true
+	}
+	return b
+}
+
+// ResizeGL changes the source dimensions, preserving the producer's context.
+// These are the render target dimensions unless FitGLToDisplay is enabled.
 // Call on the UI thread; dimensions must be positive.
 func (b *Bitmap) ResizeGL(w, h int) {
 	if b.img.GL == nil || w <= 0 || h <= 0 || (w == b.w && h == b.h) {
 		return
 	}
-	b.img.Resize(w, h)
-	for i := 3; i < len(b.img.Pix); i += 4 {
-		b.img.Pix[i] = 255
-	}
+	b.img.GL.Width, b.img.GL.Height = w, h
+	b.img.Changed()
 	b.w, b.h = w, h
 }

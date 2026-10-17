@@ -188,6 +188,7 @@ type Window struct {
 	conn         *surface.Conn
 	devTools     bool
 	invalidating atomic.Bool
+	repainting   atomic.Bool
 	// secret starts every message of the bridge in this window's pages.
 	// Only the bridge knows it, so messages posted from elsewhere (an
 	// iframe of another origin) are ignored.

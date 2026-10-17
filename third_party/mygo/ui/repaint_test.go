@@ -86,6 +86,49 @@ func TestRepaintFrames(t *testing.T) {
 	}
 }
 
+func TestExternalRepaintPreservesPendingBuilds(t *testing.T) {
+	draws := 0
+	tt := newRepaintTester(func(c *context) {
+		coreBox(c).Size(100, 20).Draw(func(p *Painter, r Rect) {
+			draws++
+			p.Fill(r, RGB(255, 0, 0), 0)
+		})
+	})
+	before := draws
+	tt.rt.repaint()
+	if built, more := tt.frame(time.Millisecond); built || more || draws != before+1 {
+		t.Fatalf("external pixels: built=%v more=%v draws=%d", built, more, draws-before)
+	}
+	for _, change := range []struct {
+		name string
+		do   func()
+	}{
+		{"state", tt.rt.changed},
+		{"frame", tt.rt.requestFrame},
+		{"theme", tt.rt.themeChanged},
+		{"input", func() { tt.rt.event(platform.SurfaceEvent{Kind: platform.PointerMove, X: 180, Y: 80}) }},
+		{"resize", func() { tt.h.w += 10 }},
+		{"text generation", func() { tt.rt.gen-- }},
+	} {
+		for _, first := range []bool{true, false} {
+			if first {
+				tt.rt.repaint()
+			}
+			change.do()
+			if !first {
+				tt.rt.repaint()
+			}
+			if built, _ := tt.frame(time.Millisecond); !built {
+				t.Fatalf("repaint lost %s (first=%v)", change.name, first)
+			}
+			tt.rt.repaint()
+			if built, _ := tt.frame(time.Millisecond); built {
+				t.Fatalf("repaint still rebuilt after %s settled", change.name)
+			}
+		}
+	}
+}
+
 func TestRepaintOnlyInView(t *testing.T) {
 	draws := 0
 	tt := newRepaintTester(func(c *context) {

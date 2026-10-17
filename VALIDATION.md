@@ -270,3 +270,43 @@ UI/HTTP 回归覆盖右键不触发详情跳转、三个菜单的请求方法/�
 首页剧集及混合媒体库横排改为 SortBy=DateLastContentAdded、SortOrder=Descending，由 Emby 根据最后新增内容排序后取 18 项；电影库继续使用 DateCreated，继续观看维持 DatePlayed。分类列表新增「最后一集添加时间」，同样由服务器排序，切换时回到第一页，翻页保持排序和筛选。字段依据 Emby 官方 SDK 的 [ItemSortBy 文档](https://github.com/MediaBrowser/Emby.SDK/blob/master/Documentation/reference/pluginapi/MediaBrowser.Model.Querying.ItemSortBy.html) 核实。
 
 更新首页请求回归，新增排序下拉 UI/HTTP 回归，覆盖四种排序字段及方向、切换重置页码、后续分页和分类/观看状态筛选。`make test vet build` 通过；未连接真实服务器验证其最后新增内容时间元数据。
+
+## 播放器资源优化（2026-10-17）
+
+GPU 位图将实际纹理尺寸与单像素 CPU 占位分开，保留原始视频尺寸、布局和跨后端黑色回退。mpv 渲染读取 `MPV_RENDER_UPDATE_FRAME`，无画面更新时复用纹理；首帧、FBO/尺寸变化和图形资源重建仍强制绘制。音轨和静态属性通过 `mpv_observe_property` 失效通知刷新，进度、丢帧和缓存区间仍每约 250 毫秒采样；切文件及事件队列溢出清除失效缓存，轨道切换不修改已发往 UI 的快照。
+
+在 AMD Ryzen 5 5560U 上，对修改前后各运行三轮相同基准：
+
+| 基准 | 修改前 | 修改后 |
+| --- | --- | --- |
+| `BenchmarkGLBitmap4K`，创建位图的 Go 分配 | 约 33,177,744 B/op | 164 B/op |
+| `BenchmarkPlaybackState`，稳定属性采样的 Go 分配 | 约 2,636 B/op，48 allocs/op | 632 B/op，13 allocs/op |
+
+复现：根目录运行 `CGO_ENABLED=0 go test ./internal/player -run '^$' -bench BenchmarkPlaybackState -benchmem -count=3`；在 `third_party/mygo` 运行 `CGO_ENABLED=0 go test ./ui -run '^$' -bench BenchmarkGLBitmap4K -benchmem -count=3`。状态基准使用固定属性缓冲，衡量包装层读取与解析，不包含真实 mpv 解码、驱动分配或事件通知成本；这些数据不能直接换算为整个进程的 CPU/RSS 降幅。
+
+验证结果：
+
+- `make test vet build` 通过；MyGO 位图、CPU 回退和 OpenGL 合成定向测试通过，UI 包 Windows/macOS 无 cgo 编译通过；已运行 `go generate ./ui`。
+- 本地多轨视频与模拟 Emby 原生 GPU 测试通过：VA-API，1080p，暂停、跳转、音轨/内封与外挂字幕切换、全屏、缓存进度和停止上报正常，丢帧均为 0。
+- 原生测试增加暂停稳定后隐藏控制条的检查，500 毫秒内 mpv 额外绘制均为 0；单元测试覆盖更新标记、目标变化和资源重建时必须绘制。
+- Wayland 和 X11 的实际窗口四角颜色验证通过，确认缩小 CPU 占位后画面方向及纹理采样正常。
+
+本轮不调整画质、解码策略或网络缓存容量。未进行真实服务器长时间播放及进程 CPU/RSS/显存的整体对照测量。
+
+## 按显示尺寸渲染与视频帧复用布局（2026-10-17）
+
+启用 `Bitmap.FitGLToDisplay()`，根据场景的设备像素、UV 裁剪和变换计算保持源比例的目标，最高为源尺寸；窗口尺寸、屏幕缩放或比例变化时调整纹理，不重建 mpv。显式使用 `dscale=bilinear`、`linear-downscaling=no`，延续原先 MyGO GL_LINEAR 缩小视频的方式，避免引入 mpv 默认线性光缩小的额外全尺寸中间缓冲。视频帧通知改用 `Window.Repaint()` 复用 UI 元素和布局；每约 250 毫秒的状态更新及交互继续正常重建，重建请求不会被视频帧覆盖。
+
+同机短时对照，基线为上一轮三项优化后的程序，使用隔离配置和同一本地 3840×2160 H.264 多轨测试视频、VA-API；合成器报告两个窗口均为 754×832。开始播放后等待 1 秒，再采样 4 秒 CPU，结束时读取 `/proc` 内存及 DRM fdinfo（按客户端 ID 去重）：
+
+| 指标 | 修改前 | 修改后 |
+| --- | --- | --- |
+| CPU（单核心 100%） | 14.2% | 13.7% |
+| RSS | 266.6 MiB | 269.3 MiB |
+| PSS | 189.5 MiB | 192.4 MiB |
+| 驱动报告 GTT 缓冲 | 460.0 MiB | 377.3 MiB |
+| 视频目标 RGBA 纹理 | 3840×2160，31.6 MiB | 1881×1058，7.6 MiB |
+
+此次明确降低了图形缓冲分配；CPU 接近，RSS/PSS 没有改善。GTT 是驱动报告的分配，不能与 RSS 相加。单次短时本地 H.264 对照不代表真实 Emby HEVC、海报和网络缓存参与时的整机占用，也不保证所有显卡的降幅。
+
+`make test vet build`、框架重绘优先级/状态更新/位图尺寸/OpenGL 合成定向测试通过；框架根包及 UI 的 Windows/macOS 无 cgo 编译通过，已运行 UI 生成器。4K 本地与模拟 Emby 的原生 GPU 测试覆盖暂停、跳转、全屏、内外字幕和音轨切换，检查目标不超过源尺寸；另验证 Wayland/X11 实际窗口四角颜色，避免纹理缩放影响方向与采样。日志新增 `mpv.render_target` 的尺寸与 RGBA 字节数，便于对照实际窗口。

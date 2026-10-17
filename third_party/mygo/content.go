@@ -155,6 +155,27 @@ func (w *Window) Invalidate() {
 	})
 }
 
+// Repaint redraws the current Content without rebuilding its view or layout
+// when only externally produced pixels changed (for example a GL video frame).
+// State changes must use Update or Invalidate; those and input take precedence.
+// Safe from any goroutine; requests coalesce. It does nothing for web pages.
+func (w *Window) Repaint() {
+	if w.content == nil || !w.repainting.CompareAndSwap(false, true) {
+		return
+	}
+	postMain(func() {
+		w.repainting.Store(false)
+		if w.conn == nil || w.native == nil {
+			return
+		}
+		if w.conn.Repaint != nil {
+			w.conn.Repaint()
+		} else {
+			w.contentChanged()
+		}
+	})
+}
+
 // Update runs fn on the main thread, where the window's Content builds its
 // user interface, then redraws the Content. Goroutines change the state
 // the interface shows through it:

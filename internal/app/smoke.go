@@ -12,6 +12,7 @@ import (
 func (a *App) Smoke(file string) error {
 	var failure string
 	var frames uint64
+	var pausedFrames uint64
 	var pos float64
 	var tracks int
 	var cacheRanges int
@@ -52,6 +53,20 @@ func (a *App) Smoke(file string) error {
 				if !a.state.Paused {
 					failure = "pause failed"
 				}
+				pausedFrames = a.player.FrameCount()
+				a.controlsHidden = true
+			})
+			time.Sleep(500 * time.Millisecond)
+			a.update(func() {
+				if a.player == nil {
+					return
+				}
+				extra := a.player.FrameCount() - pausedFrames
+				fmt.Printf("paused UI repaint: mpv renders=%d\n", extra)
+				if extra != 0 {
+					failure = "paused UI updates unnecessarily rendered video"
+				}
+				a.controlsHidden = false
 				a.seek(7)
 				for _, track := range a.state.Tracks {
 					if (track.Type == "audio" && track.ID == 2) || (track.Type == "sub" && track.ID == 1) {
@@ -92,6 +107,11 @@ func (a *App) Smoke(file string) error {
 						failure = "HTTP playback did not expose buffered ranges"
 					}
 					fmt.Printf("gpu frames=%d position=%.2f tracks=%d hwdec=%s size=%dx%d dropped=%d cache_ranges=%d\n", frames, a.state.Position, len(a.state.Tracks), a.state.HWDec, a.state.Width, a.state.Height, a.state.DroppedFrames, cacheRanges)
+					w, h := a.player.RenderSize()
+					fmt.Printf("render target=%dx%d rgba_bytes=%d\n", w, h, int64(w)*int64(h)*4)
+					if w <= 0 || h <= 0 || w > a.state.Width || h > a.state.Height {
+						failure = "invalid adaptive render target"
+					}
 				}
 				a.win.Close()
 			})

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,6 +70,7 @@ type api struct {
 	option         func(uintptr, string, string) int32
 	command        func(uintptr, **byte) int32
 	property       func(uintptr, string) uintptr
+	observe        func(uintptr, uint64, string, int32) int32
 	free           func(uintptr)
 	wait           func(uintptr, float64) uintptr
 	terminate      func(uintptr)
@@ -95,6 +97,7 @@ func load() {
 			return
 		}
 		bindings := map[string]any{"mpv_request_log_messages": &lib.requestLogs, "mpv_create": &lib.create, "mpv_initialize": &lib.initialize, "mpv_set_option_string": &lib.option, "mpv_command": &lib.command, "mpv_get_property_string": &lib.property, "mpv_free": &lib.free, "mpv_wait_event": &lib.wait, "mpv_terminate_destroy": &lib.terminate, "mpv_render_context_create": &lib.renderCreate, "mpv_render_context_render": &lib.render, "mpv_render_context_free": &lib.renderFree, "mpv_render_context_update": &lib.renderUpdate, "mpv_render_context_set_update_callback": &lib.renderCallback, "mpv_error_string": &lib.errorString}
+		bindings["mpv_observe_property"] = &lib.observe
 		for n, p := range bindings {
 			sym, e := purego.Dlsym(h, n)
 			if e != nil {
@@ -137,6 +140,14 @@ type Player struct {
 	failed                   bool
 	ready                    bool
 	redraw                   func()
+	// Metadata belongs to the event goroutine; snapshots share immutable tracks.
+	cachedState                State
+	stateReady                 bool
+	metadataDirty, tracksDirty bool
+	// The target belongs to the render thread. UI-only repaints reuse its pixels.
+	rendered                  bool
+	targetFBO                 uint32
+	targetWidth, targetHeight int
 }
 
 func New(redraw func()) (*Player, error) {
@@ -154,7 +165,15 @@ func New(redraw func()) (*Player, error) {
 		diagnostics.Log("mpv.create_error", "error", "mpv_create returned NULL")
 		return nil, errors.New("无法创建播放器，详情见播放诊断日志")
 	}
-	for k, v := range map[string]string{"vo": "libmpv", "hwdec": "auto-safe", "terminal": "no", "input-default-bindings": "no", "input-vo-keyboard": "no", "osc": "no", "config": "no", "idle": "yes", "keep-open": "no", "network-timeout": "20"} {
+	for k, v := range map[string]string{
+		"vo": "libmpv", "hwdec": "auto-safe", "terminal": "no",
+		"input-default-bindings": "no", "input-vo-keyboard": "no", "osc": "no",
+		"config": "no", "idle": "yes", "keep-open": "no", "network-timeout": "20",
+		// Previously MyGO reduced the full-size video with GL_LINEAR. Keep that
+		// lightweight filter when mpv renders directly at the displayed size;
+		// its default linear-light downscaling adds full-size intermediate FBOs.
+		"dscale": "bilinear", "linear-downscaling": "no",
+	} {
 		if code := lib.option(h, k, v); code < 0 {
 			lib.terminate(h)
 			return nil, fmt.Errorf("mpv %s: %s", k, lib.errorString(code))
@@ -166,6 +185,17 @@ func New(redraw func()) (*Player, error) {
 		return nil, errors.New(lib.errorString(code))
 	}
 	lib.requestLogs(h, "warn")
+	for _, name := range []string{"dwidth", "dheight", "duration", "volume", "pause", "mute", "paused-for-cache", "hwdec-current", "video-format", "audio-codec-name", "track-list"} {
+		id := metadataObservation
+		if name == "track-list" {
+			id = tracksObservation
+		}
+		// MPV_FORMAT_NONE reports invalidations without allocating property values.
+		if code := lib.observe(h, id, name, 0); code < 0 {
+			lib.terminate(h)
+			return nil, fmt.Errorf("mpv observe %s: %s", name, lib.errorString(code))
+		}
+	}
 	p := &Player{handle: h, id: uintptr(nextID.Add(1)), Events: make(chan Event, 64), wake: make(chan struct{}, 1), done: make(chan struct{}), stopped: make(chan struct{}), commands: make(chan []string, 64), redraw: redraw}
 	diagnostics.Log("mpv.initialized", "version", p.get("mpv-version"), "ffmpeg", p.get("ffmpeg-version"))
 	clients.Store(p.id, p)
@@ -235,22 +265,52 @@ func cString(p uintptr) string {
 	return string(b)
 }
 func (p *Player) state() State {
-	var s State
-	fmt.Sscan(p.get("frame-drop-count"), &s.DroppedFrames)
-	fmt.Sscan(p.get("dwidth"), &s.Width)
-	fmt.Sscan(p.get("dheight"), &s.Height)
-	fmt.Sscan(p.get("time-pos"), &s.Position)
-	fmt.Sscan(p.get("duration"), &s.Duration)
-	fmt.Sscan(p.get("volume"), &s.Volume)
-	s.Paused = p.get("pause") == "yes"
-	s.Muted = p.get("mute") == "yes"
-	s.Buffering = p.get("paused-for-cache") == "yes"
-	s.HWDec = p.get("hwdec-current")
-	s.VideoCodec = p.get("video-format")
-	s.AudioCodec = p.get("audio-codec-name")
-	_ = json.Unmarshal([]byte(p.get("track-list")), &s.Tracks)
+	s := p.cachedState
+	if !p.stateReady || p.metadataDirty {
+		s.Width, _ = strconv.Atoi(p.get("dwidth"))
+		s.Height, _ = strconv.Atoi(p.get("dheight"))
+		s.Duration, _ = strconv.ParseFloat(p.get("duration"), 64)
+		s.Volume, _ = strconv.ParseFloat(p.get("volume"), 64)
+		s.Paused = p.get("pause") == "yes"
+		s.Muted = p.get("mute") == "yes"
+		s.Buffering = p.get("paused-for-cache") == "yes"
+		s.HWDec = p.get("hwdec-current")
+		s.VideoCodec = p.get("video-format")
+		s.AudioCodec = p.get("audio-codec-name")
+	}
+	if !p.stateReady || p.tracksDirty {
+		// Never decode into a slice already delivered to the UI goroutine.
+		s.Tracks = nil
+		_ = json.Unmarshal([]byte(p.get("track-list")), &s.Tracks)
+	}
+	p.cachedState = s
+	p.stateReady, p.metadataDirty, p.tracksDirty = true, false, false
+	s.DroppedFrames, _ = strconv.ParseInt(p.get("frame-drop-count"), 10, 64)
+	s.Position, _ = strconv.ParseFloat(p.get("time-pos"), 64)
 	s.CacheRanges = parseCacheRanges(p.get("demuxer-cache-state"))
 	return s
+}
+
+const (
+	metadataObservation uint64 = 1
+	tracksObservation   uint64 = 2
+)
+
+func (p *Player) invalidateState(e mpvEvent) {
+	switch e.ID {
+	case 6: // START_FILE: no metadata from the previous file may survive.
+		p.cachedState, p.stateReady = State{}, false
+	case 8, 24: // FILE_LOADED or QUEUE_OVERFLOW: refresh everything.
+		p.metadataDirty, p.tracksDirty = true, true
+	case 17, 18, 21: // VIDEO/AUDIO_RECONFIG, PLAYBACK_RESTART.
+		p.metadataDirty = true
+	case 22: // PROPERTY_CHANGE; values are read at the next snapshot.
+		if e.Userdata == tracksObservation {
+			p.tracksDirty = true
+		} else if e.Userdata == metadataObservation {
+			p.metadataDirty = true
+		}
+	}
 }
 func (p *Player) loop() {
 	defer close(p.stopped)
@@ -268,6 +328,7 @@ func (p *Player) loop() {
 		ptr := lib.wait(p.handle, .05)
 		if ptr != 0 {
 			e := *(*mpvEvent)(nativePointer(ptr))
+			p.invalidateState(e)
 			switch e.ID {
 			case 2:
 				if e.Data != nil {
@@ -334,8 +395,11 @@ func (p *Player) Render(context uintptr, fbo uint32, w, h int) {
 			p.emit(Event{Kind: "ready"})
 		}
 	}
-	p.frames.Add(1)
-	lib.renderUpdate(p.renderContext)
+	updates := lib.renderUpdate(p.renderContext)
+	targetChanged := !p.rendered || p.targetFBO != fbo || p.targetWidth != w || p.targetHeight != h
+	if updates&1 == 0 && !targetChanged {
+		return
+	}
 	target := struct{ FBO, W, H, Format int32 }{int32(fbo), int32(w), int32(h), 0}
 	// MyGO samples this offscreen texture with its first row at the UI top.
 	// FLIP_Y is needed for a default window framebuffer, not this texture FBO.
@@ -345,9 +409,20 @@ func (p *Player) Render(context uintptr, fbo uint32, w, h int) {
 	if code := lib.render(p.renderContext, &params[0]); code < 0 {
 		p.failed = true
 		p.emit(Event{Kind: "error", Err: errors.New("GPU 渲染失败")})
+		return
 	}
+	p.rendered, p.targetFBO, p.targetWidth, p.targetHeight = true, fbo, w, h
+	if targetChanged {
+		diagnostics.Log("mpv.render_target", "width", w, "height", h, "rgba_bytes", int64(w)*int64(h)*4)
+	}
+	p.frames.Add(1)
 }
+
+// RenderSize reports the current target. Call only on the UI/render thread.
+func (p *Player) RenderSize() (int, int) { return p.targetWidth, p.targetHeight }
+
 func (p *Player) ReleaseGraphics() {
+	p.rendered = false
 	if p.renderContext != 0 {
 		lib.renderCallback(p.renderContext, 0, 0)
 		lib.renderFree(p.renderContext)

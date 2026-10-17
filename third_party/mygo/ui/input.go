@@ -13,6 +13,7 @@ import (
 func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	if ev.Kind != platform.SurfaceFrame {
 		// Whatever the event changes, the next frame builds anew.
+		rt.needsBuild = true
 		rt.redraw = false
 	}
 	x, y := float32(ev.X), float32(ev.Y)

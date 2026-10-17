@@ -12,8 +12,18 @@
 - 回调不可等待 UI，也不可在其中发起网络请求。libmpv 的更新回调只唤醒 UI；命令和事件循环在独立 goroutine 上运行。
 - 外部图像在图集上传和 UI 批次之前绘制，之后恢复 FBO、纹理单元、像素解包和相关 GL 状态。普通 UI 仍按既有顺序绘制。
 - CPU、Metal、D3D11 使用黑色位图占位；应用首版只启用 Linux GPU 播放，并在 GPU 未初始化时提示错误。不进行逐帧 CPU 回读。
+- GPU 目标尺寸独立存放于 `scene.GLImage.Width/Height`；CPU 占位仅保留一个不透明黑色像素，布局仍使用视频原始尺寸，各后端按归一化 UV 采样。4K 不再额外分配约 31.6 MiB 的 CPU 黑图，`ResizeGL` 也不分配整帧像素。
+- 可选 `Bitmap.FitGLToDisplay()` 按场景的实际设备像素缩小 GL 目标，维持源比例并以源尺寸为上限。计算包含裁剪 UV、旋转/缩放；透视变换保守保留原尺寸。同一位图显示多次时取最大需求，只渲染一次。窗口缩放仅重建框架 FBO/纹理，不释放 mpv 上下文；其他后端继续使用单像素回退。Ape Player 已启用。
 
-新增 `internal/gpu/gl/external_test.go` 验证画面合成、上层原生 UI、尺寸变化及释放时机。修改的其他文件为 `ui/bitmap.go`、`internal/scene/scene.go`、`internal/gpu/gl/gl.go`、`internal/linux/surface.go`。
+新增 `internal/gpu/gl/external_test.go` 验证画面合成、上层原生 UI、尺寸变化及释放时机；`ui/gl_bitmap_test.go` 验证单像素占位、缩放后的布局比例和 CPU 回退，并提供 4K 位图分配基准。修改的其他文件为 `ui/bitmap.go`、`internal/scene/scene.go`、`internal/gpu/gl/gl.go`、`internal/linux/surface.go`。
+
+`internal/gpu/gl/external_size_test.go` 覆盖小窗口、高 DPI、全屏、源尺寸上限、强制比例、裁剪、变换和最小尺寸；真实 OpenGL 测试验证目标缩放后的左右颜色采样、生产者生命周期及同图多处显示。
+
+## 外部图像重绘
+
+新增线程安全的 `Window.Repaint()`，用于只有外部 GPU 图像像素发生变化的帧。请求合并后通过 `surface.Conn.Repaint` 进入 UI，复用已有元素和布局；`Update`/`Invalidate`、输入、主题变化及需要重建的动画优先，尺寸或文字系统变化仍触发正常构建。Ape Player 的 mpv 帧通知使用该入口，进度及交互继续走正常状态更新。
+
+修改 `content.go`、`window.go`、`internal/surface/surface.go` 和 `ui/window.go`、`runtime.go`、`input.go`。`TestContentRepaint` 与 `TestExternalRepaintPreservesPendingBuilds` 覆盖仅重绘、连续请求合并、状态更新先后顺序，以及输入、主题、窗口尺寸和文字缓存变化不会丢失。
 
 ## 常驻滚动条
 

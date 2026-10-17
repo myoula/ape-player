@@ -220,6 +220,7 @@ type engine struct {
 	repainting   bool
 	repaintAt    time.Time
 	redraw       bool
+	needsBuild   bool // external repaint requests must not supersede state/input
 	held         bool
 	painted      [3]float32
 	gen          uint64
@@ -364,6 +365,7 @@ func (rt *engine) defaultTheme() *Theme {
 // themeChanged follows a change of the system appearance, or of the
 // desktop's preferences.
 func (rt *engine) themeChanged() {
+	rt.needsBuild = true
 	rt.darkKnown, rt.prefsKnown = false, false
 	rt.redraw, rt.repaintDue = false, time.Time{}
 	rt.host.requestFrame()
@@ -512,6 +514,7 @@ func (rt *engine) now() time.Time {
 // (SurfaceShown) rather than draw frames nobody sees, as browsers pause
 // the animation frames of windows out of sight.
 func (rt *engine) next() {
+	rt.needsBuild = rt.animating
 	rt.redraw, rt.repaintDue, rt.held = false, time.Time{}, false
 	moving := rt.animating || rt.repainting || !rt.repaintAt.IsZero()
 	switch {
@@ -708,6 +711,7 @@ func (rt *engine) requestFrame() {
 	if rt.inFrame {
 		return
 	}
+	rt.needsBuild = true
 	rt.redraw, rt.repaintDue = false, time.Time{}
 	rt.host.requestFrame()
 }
@@ -715,7 +719,18 @@ func (rt *engine) requestFrame() {
 // changed asks the host for a frame built anew after the app changed what
 // the view shows, from outside the view (surface.Conn.Changed).
 func (rt *engine) changed() {
+	rt.needsBuild = true
 	rt.redraw, rt.repaintDue = false, time.Time{}
+	rt.host.requestFrame()
+}
+
+// repaint reuses layout for an external image update. An input or state update
+// since the last frame requires a build even if this request arrives last.
+func (rt *engine) repaint() {
+	if !rt.needsBuild && !rt.inFrame {
+		rt.redraw = true
+	}
+	rt.repaintDue = time.Time{}
 	rt.host.requestFrame()
 }
 
